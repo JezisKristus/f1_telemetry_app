@@ -9,44 +9,36 @@ logger = logging.getLogger(__name__)
 
 
 class DBManager:
-    def __init__(self, db_name="f1_telemetry.db"):
-        # Safely resolve the directory of this script to store the DB locally
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        self.db_path = os.path.join(current_dir, db_name)
+    def __init__(self, db_name="f1_telemetry.db", db_path=None):
+        if db_path:
+            self.db_path = db_path
+        else:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            self.db_path = os.path.join(current_dir, db_name)
 
-        # ensure directory exists (defensive)
         try:
-            os.makedirs(current_dir, exist_ok=True)
+            os.makedirs(os.path.dirname(self.db_path) or ".", exist_ok=True)
         except OSError:
-            # If creating the directory fails, let sqlite raise a useful error later
-            logger.exception("Failed to ensure database directory exists: %s", current_dir)
+            logger.exception("Failed to ensure database directory exists")
 
-        # Try to connect. If the DB file is missing it will be created by sqlite3.
-        # If the file exists but is corrupted, detect it and recreate a fresh DB
         self.conn = None
         self.cursor = None
         try:
             self._connect()
             self._ensure_tables()
         except sqlite3.DatabaseError as e:
-            # Common case: "file is not a database" or other corruption
             logger.warning("Database error on open/setup: %s", e)
-            # Move corrupt DB aside and recreate
             try:
                 timestamp = int(time.time())
                 corrupt_name = f"{self.db_path}.corrupt.{timestamp}"
                 shutil.move(self.db_path, corrupt_name)
                 logger.warning("Moved corrupt DB to %s and will recreate a fresh DB.", corrupt_name)
             except Exception:
-                logger.exception("Failed to move corrupt DB file. Proceeding to attempt recreate anyway.")
-
-            # Retry connecting to a new DB file
+                logger.exception("Failed to move corrupt DB file.")
             self._connect()
             self._ensure_tables()
 
     def _connect(self):
-        # Encapsulate connect so we can retry cleanly
-        # check_same_thread=False allows our UDP listener thread to write to it
         if self.conn:
             try:
                 self.conn.close()
@@ -56,7 +48,6 @@ class DBManager:
         self.cursor = self.conn.cursor()
 
     def _ensure_tables(self):
-        # Verify that expected tables exist; if not, (re)create them.
         try:
             cur = self.cursor
             cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
@@ -65,57 +56,82 @@ class DBManager:
             if not required.issubset(existing):
                 logger.info("Missing tables detected (%s). Creating tables...", required - existing)
                 self.setup_tables()
-            else:
-                # Tables exist, but check if we need to add missing columns (schema migration)
-                self._migrate_telemetry_schema()
+            self._run_migrations()
         except sqlite3.DatabaseError:
-            # Propagate to caller to handle (e.g. treat as corruption)
             raise
 
-    def _migrate_telemetry_schema(self):
-        """Add missing columns to telemetry table if they don't exist."""
+    def _add_column_if_missing(self, table, column, col_type):
+        cur = self.cursor
+        cur.execute(f"PRAGMA table_info({table})")
+        existing = {row[1] for row in cur.fetchall()}
+        if column not in existing:
+            try:
+                cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+                logger.info("Added column %s.%s", table, column)
+            except sqlite3.OperationalError as e:
+                logger.warning("Could not add column %s.%s: %s", table, column, e)
+
+    def _run_migrations(self):
+        """Apply incremental schema migrations."""
         try:
-            cur = self.cursor
-            # Get existing columns in telemetry table
-            cur.execute("PRAGMA table_info(telemetry)")
-            existing_columns = {row[1] for row in cur.fetchall()}
+            # telemetry columns
+            for col, typ in [
+                ("temp_sur_fl", "REAL DEFAULT 0.0"), ("temp_sur_fr", "REAL DEFAULT 0.0"),
+                ("temp_sur_rl", "REAL DEFAULT 0.0"), ("temp_sur_rr", "REAL DEFAULT 0.0"),
+                ("temp_core_fl", "REAL DEFAULT 0.0"), ("temp_core_fr", "REAL DEFAULT 0.0"),
+                ("temp_core_rl", "REAL DEFAULT 0.0"), ("temp_core_rr", "REAL DEFAULT 0.0"),
+                ("session_time", "REAL DEFAULT 0.0"), ("drs", "INTEGER DEFAULT 0"),
+                ("ers_mode", "INTEGER DEFAULT 0"), ("g_lat", "REAL DEFAULT 0.0"),
+                ("g_long", "REAL DEFAULT 0.0"),
+            ]:
+                self._add_column_if_missing("telemetry", col, typ)
 
-            # Define the columns we need
-            required_columns = {
-                "temp_sur_fl", "temp_sur_fr", "temp_sur_rl", "temp_sur_rr",
-                "temp_core_fl", "temp_core_fr", "temp_core_rl", "temp_core_rr"
-            }
+            # laps columns
+            for col, typ in [
+                ("wear_fr", "REAL DEFAULT 0.0"), ("wear_rl", "REAL DEFAULT 0.0"),
+                ("wear_rr", "REAL DEFAULT 0.0"), ("is_valid", "INTEGER DEFAULT 1"),
+                ("position", "INTEGER DEFAULT 0"), ("delta_front_ms", "INTEGER DEFAULT 0"),
+                ("wear_fl", "REAL DEFAULT 0.0"),
+            ]:
+                self._add_column_if_missing("laps", col, typ)
 
-            # Add missing columns
-            missing = required_columns - existing_columns
-            if missing:
-                logger.info("Adding missing columns to telemetry table: %s", missing)
-                for col in missing:
-                    try:
-                        # Use parameterized query to avoid SQL injection
-                        query = f"ALTER TABLE telemetry ADD COLUMN {col} REAL DEFAULT 0.0"
-                        self.cursor.execute(query)
-                        logger.info("Added column %s to telemetry table", col)
-                    except sqlite3.OperationalError as e:
-                        # Column might already exist, or other issue
-                        logger.warning("Could not add column %s: %s", col, e)
-                self.conn.commit()
+            # sessions columns
+            for col, typ in [
+                ("track_name", "TEXT DEFAULT ''"),
+                ("session_type_name", "TEXT DEFAULT ''"),
+            ]:
+                self._add_column_if_missing("sessions", col, typ)
+
+            # setups columns
+            self._add_column_if_missing("setups", "lap_id", "TEXT DEFAULT ''")
+            self._add_column_if_missing("setups", "id", "INTEGER")
+
+            # index for delta queries
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_telemetry_session_distance "
+                "ON telemetry (session_uid, lap_distance)"
+            )
+            self.cursor.execute(
+                "CREATE INDEX IF NOT EXISTS idx_laps_session_car "
+                "ON laps (session_uid, car_index)"
+            )
+            self.conn.commit()
         except Exception:
-            logger.exception("Error during telemetry schema migration")
+            logger.exception("Error during schema migration")
 
     def setup_tables(self):
-        # Master session data
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS sessions (
                 session_uid TEXT PRIMARY KEY,
                 track_id INTEGER,
                 weather INTEGER,
                 ai_difficulty INTEGER,
-                session_type INTEGER
+                session_type INTEGER,
+                track_name TEXT DEFAULT '',
+                session_type_name TEXT DEFAULT ''
             )
         ''')
 
-        # Grid-wide lap data (Low-frequency)
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS laps (
                 lap_id TEXT PRIMARY KEY,
@@ -126,11 +142,17 @@ class DBManager:
                 sector_3_ms INTEGER,
                 tire_compound INTEGER,
                 wear_end_pct REAL,
-                lap_time_ms INTEGER
+                wear_fl REAL DEFAULT 0.0,
+                wear_fr REAL DEFAULT 0.0,
+                wear_rl REAL DEFAULT 0.0,
+                wear_rr REAL DEFAULT 0.0,
+                lap_time_ms INTEGER,
+                is_valid INTEGER DEFAULT 1,
+                position INTEGER DEFAULT 0,
+                delta_front_ms INTEGER DEFAULT 0
             )
         ''')
 
-        # Player/Teammate Micro-telemetry (High-frequency)
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS telemetry (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,6 +165,11 @@ class DBManager:
                 gear INTEGER,
                 yaw REAL DEFAULT 0.0,
                 g_forces REAL DEFAULT 0.0,
+                g_lat REAL DEFAULT 0.0,
+                g_long REAL DEFAULT 0.0,
+                session_time REAL DEFAULT 0.0,
+                drs INTEGER DEFAULT 0,
+                ers_mode INTEGER DEFAULT 0,
                 temp_sur_fl REAL DEFAULT 0.0,
                 temp_sur_fr REAL DEFAULT 0.0,
                 temp_sur_rl REAL DEFAULT 0.0,
@@ -154,14 +181,27 @@ class DBManager:
             )
         ''')
 
-        # Setup and aerodynamic data
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS setups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_uid TEXT,
+                lap_id TEXT DEFAULT '',
                 front_wing INTEGER,
                 rear_wing INTEGER,
                 suspension_geometry TEXT,
                 tire_pressures TEXT
             )
         ''')
+        self.conn.commit()
+
+    def list_sessions(self):
+        self.cursor.execute(
+            "SELECT session_uid, track_name, session_type_name, track_id "
+            "FROM sessions ORDER BY rowid DESC"
+        )
+        return self.cursor.fetchall()
+
+    def delete_session(self, session_uid):
+        for table in ("telemetry", "laps", "setups", "sessions"):
+            self.cursor.execute(f"DELETE FROM {table} WHERE session_uid = ?", (session_uid,))
         self.conn.commit()

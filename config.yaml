@@ -1,0 +1,19 @@
+udp:
+  listen_port: 20777
+  forward_host: 127.0.0.1
+  forward_port: 20778
+
+database:
+  path: database/f1_telemetry.db
+
+logging:
+  level: INFO
+
+strategy:
+  pit_loss_seconds: 22
+  wear_cliff_pct: 70
+  dirty_air_delta_seconds: 1.5
+  dirty_air_lap_threshold: 3
+
+player:
+  car_index: null  # null = use packet header playerCarIndex
