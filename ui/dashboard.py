@@ -1,10 +1,12 @@
 import sqlite3
+import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QColor
+from analytics.stint_analyzer import StintAnalyzer
 
 
 class TelemetryDashboard(QMainWindow):
@@ -43,6 +45,35 @@ class TelemetryDashboard(QMainWindow):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.layout.addWidget(self.table)
 
+        # Degradation analysis plot
+        self.degradation_plot = pg.PlotWidget(title="Tire Degradation Analysis")
+        self.degradation_plot.setLabel('bottom', 'Lap Number')
+        self.degradation_plot.setLabel('left', 'Lap Time (s)')
+
+        # Configure clean aesthetic: remove grid lines, minimal ticks
+        self.degradation_plot.showGrid(x=False, y=False)
+
+        # Create right Y-axis for tire wear percentage
+        self.right_axis = pg.ViewBox()
+        self.degradation_plot.getPlotItem().layout.addItem(self.right_axis, 2, 3)
+        self.degradation_plot.getPlotItem().getAxis('right').linkToView(self.right_axis)
+        self.degradation_plot.getPlotItem().getAxis('right').setLabel('Tire Wear (%)')
+
+        # Update geometry when plot is resized
+        self.degradation_plot.getPlotItem().vb.sigResized.connect(self._update_right_axis_geometry)
+
+        # Create curves for actual lap times, predicted lap times, and wear
+        self.actual_time_curve = pg.PlotCurveItem(pen=pg.mkPen(color='white', width=2))
+        self.predicted_time_curve = pg.PlotCurveItem(pen=pg.mkPen(color='red', width=2, style=Qt.PenStyle.DashLine))
+        self.wear_curve = pg.PlotCurveItem(pen=pg.mkPen(color='cyan', width=2))
+
+        # Add curves to plot
+        self.degradation_plot.addItem(self.actual_time_curve)
+        self.degradation_plot.addItem(self.predicted_time_curve)
+        self.right_axis.addItem(self.wear_curve)
+
+        self.layout.addWidget(self.degradation_plot)
+
         # Timer for periodic updates (500 ms)
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_ui)
@@ -50,6 +81,10 @@ class TelemetryDashboard(QMainWindow):
 
         # Initial population
         self.update_ui()
+
+    def _update_right_axis_geometry(self):
+        """Update the right axis geometry when the plot is resized."""
+        self.right_axis.setGeometry(self.degradation_plot.getPlotItem().vb.sceneBoundingRect())
 
     def update_ui(self):
         """Query the DB for the latest 15 laps (lap_time_ms > 0) and update the table.
@@ -119,6 +154,36 @@ class TelemetryDashboard(QMainWindow):
                 s3_item = QTableWidgetItem(fmt(s3_ms))
                 s3_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r_idx, 4, s3_item)
+
+            # Update degradation curve if session_uid is valid
+            if session_uid != "-":
+                try:
+                    # Get the first car_index from the rows for degradation analysis
+                    if rows:
+                        car_index = rows[0][0]  # car_index from first row
+
+                        # Instantiate StintAnalyzer and get degradation prediction
+                        analyzer = StintAnalyzer(self.db_path)
+                        prediction = analyzer.predict_degradation_curve(session_uid, car_index)
+
+                        # Update curves if we have enough data (more than 3 valid laps)
+                        if prediction and len(prediction["lap_numbers"]) > 3:
+                            self.actual_time_curve.setData(
+                                x=prediction["lap_numbers"],
+                                y=prediction["actual_times"]
+                            )
+                            self.predicted_time_curve.setData(
+                                x=prediction["lap_numbers"],
+                                y=prediction["predicted_times"]
+                            )
+                            self.wear_curve.setData(
+                                x=prediction["lap_numbers"],
+                                y=prediction["wear_percentages"]
+                            )
+                except Exception as e:
+                    # Log degradation analysis error but don't crash the UI
+                    print(f"Degradation analysis error: {e}")
+
 
         except Exception as e:
             # Avoid crashing the UI; print for debugging

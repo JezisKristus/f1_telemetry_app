@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 import numpy as np  # Imported for future statistical analysis
+from scipy.stats import linregress
 
 
 class StintAnalyzer:
@@ -106,6 +107,93 @@ class StintAnalyzer:
         finally:
             conn.close()
 
+    def predict_degradation_curve(self, session_uid, car_index):
+        """
+        Predict tire degradation curve using linear regression.
+
+        Args:
+            session_uid (str): The session unique identifier.
+            car_index (int): The car index.
+
+        Returns:
+            dict: Dictionary containing:
+                - lap_numbers: List of lap numbers
+                - actual_times: List of actual lap times in seconds
+                - wear_percentages: List of tire wear percentages
+                - predicted_times: List of predicted lap times in seconds
+                - time_lost_per_one_percent_wear: The slope (time lost per 1% wear)
+        """
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
+        try:
+            # Query all laps for the session and car where lap_time_ms > 0
+            cursor.execute(
+                """
+                SELECT lap_time_ms, wear_end_pct
+                FROM laps
+                WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0
+                ORDER BY rowid
+                """,
+                (session_uid, car_index),
+            )
+
+            laps = cursor.fetchall()
+
+            if not laps or len(laps) < 2:
+                # Return empty result if fewer than 2 laps found
+                return {
+                    "lap_numbers": [],
+                    "actual_times": [],
+                    "wear_percentages": [],
+                    "predicted_times": [],
+                    "time_lost_per_one_percent_wear": 0.0,
+                }
+
+            # Convert to DataFrame for easier analysis
+            df = pd.DataFrame(laps)
+            df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
+            df["lap_number"] = range(1, len(df) + 1)
+
+            # Find fastest lap time
+            fastest_lap = df["lap_time_sec"].min()
+
+            # Filter out dirty laps (more than 105% of fastest lap)
+            outlier_threshold = fastest_lap * 1.05
+            df_filtered = df[df["lap_time_sec"] <= outlier_threshold].copy()
+
+            if len(df_filtered) < 2:
+                # Not enough valid data for regression
+                return {
+                    "lap_numbers": [],
+                    "actual_times": [],
+                    "wear_percentages": [],
+                    "predicted_times": [],
+                    "time_lost_per_one_percent_wear": 0.0,
+                }
+
+            # Prepare data for linear regression: wear as X, lap time as Y
+            X = df_filtered["wear_end_pct"].values
+            Y = df_filtered["lap_time_sec"].values
+
+            # Run linear regression
+            slope, intercept, r_value, p_value, std_err = linregress(X, Y)
+
+            # Calculate predicted lap times
+            predicted_times = slope * X + intercept
+
+            return {
+                "lap_numbers": df_filtered["lap_number"].tolist(),
+                "actual_times": Y.tolist(),
+                "wear_percentages": X.tolist(),
+                "predicted_times": predicted_times.tolist(),
+                "time_lost_per_one_percent_wear": slope,
+            }
+
+        finally:
+            conn.close()
+
 
 if __name__ == "__main__":
     # Test with hardcoded values
@@ -115,6 +203,25 @@ if __name__ == "__main__":
 
     analyzer = StintAnalyzer(db_path)
     summary = analyzer.get_stint_summary(session_uid, car_index)
+
+    print(f"Stint Summary for Session {session_uid}, Car {car_index}:")
+    print(f"  Total Laps: {summary['total_laps']}")
+    print(f"  Fastest Lap: {summary['fastest_lap']:.3f}s" if summary['fastest_lap'] else "  Fastest Lap: N/A")
+    print(
+        f"  Average Lap Time: {summary['average_lap_time']:.3f}s"
+        if summary['average_lap_time']
+        else "  Average Lap Time: N/A"
+    )
+    print(
+        f"  Average Wear per Lap: {summary['average_wear_per_lap']:.2f}%"
+        if summary['average_wear_per_lap'] is not None
+        else "  Average Wear per Lap: N/A"
+    )
+    print(
+        f"  Laps Until Cliff: {summary['laps_until_cliff']}"
+        if summary['laps_until_cliff']
+        else "  Laps Until Cliff: N/A"
+    )
 
     print(f"Stint Summary for Session {session_uid}, Car {car_index}:")
     print(f"  Total Laps: {summary['total_laps']}")
