@@ -1,7 +1,6 @@
 import sqlite3
-from pathlib import Path
-import os
 import sys
+from pathlib import Path
 
 # Resolve DB path relative to project
 db_path = Path(__file__).resolve().parents[1] / "database" / "f1_telemetry.db"

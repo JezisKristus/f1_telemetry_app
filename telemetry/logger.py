@@ -1,20 +1,19 @@
+import logging
+import queue
 import socket
 import struct
-import logging
 import sys
-import queue
 import threading
 import time
 
-from telemetry.packets import HEADER_FMT, HEADER_SIZE, NUM_CARS
+from telemetry.packets import HEADER_FMT, HEADER_SIZE
+from telemetry.packets.car_damage import parse_car_damage
+from telemetry.packets.car_setup import parse_setup_packet
+from telemetry.packets.car_status import parse_car_status
+from telemetry.packets.car_telemetry import parse_car_telemetry
+from telemetry.packets.lap_data import parse_lap_packet
 from telemetry.packets.motion import parse_motion_packet
 from telemetry.packets.session import parse_session_packet
-from telemetry.packets.lap_data import parse_lap_packet
-from telemetry.packets.car_setup import parse_setup_packet
-from telemetry.packets.car_telemetry import parse_car_telemetry
-from telemetry.packets.car_status import parse_car_status
-from telemetry.packets.car_damage import parse_car_damage
-from telemetry.proxy import UDPForwarder
 
 logger = logging.getLogger(__name__)
 

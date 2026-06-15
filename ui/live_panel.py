@@ -1,15 +1,16 @@
 import sqlite3
+
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QGroupBox, QProgressBar, QGridLayout,
 )
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QColor
 
 from analytics.stint_analyzer import StintAnalyzer
-from analytics.strategy.pit_window import PitWindowCalculator
-from analytics.strategy.tire_monitor import PushSaveMonitor
 from analytics.strategy.dirty_air import DirtyAirMonitor
 from analytics.strategy.fuel_ers import FuelERSManager
+from analytics.strategy.pit_window import PitWindowCalculator
+from analytics.strategy.tire_monitor import PushSaveMonitor
 
 
 def _format_ms(ms_val):

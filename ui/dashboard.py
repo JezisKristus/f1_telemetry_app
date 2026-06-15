@@ -1,14 +1,15 @@
 import sqlite3
-import pyqtgraph as pg
 import traceback
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QTabWidget
+
+import pyqtgraph as pg
 from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QTabWidget
 
 from analytics.stint_analyzer import StintAnalyzer
-from ui.live_panel import LivePanel
 from ui.coach_panel import CoachPanel
-from ui.track_map import TrackMapPanel
 from ui.history_panel import HistoryPanel
+from ui.live_panel import LivePanel
+from ui.track_map import TrackMapPanel
 
 
 class TelemetryDashboard(QMainWindow):

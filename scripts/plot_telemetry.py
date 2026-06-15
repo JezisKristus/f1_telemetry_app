@@ -1,7 +1,8 @@
 import sqlite3
-import pandas as pd
-import matplotlib.pyplot as plt
 from pathlib import Path
+
+import matplotlib.pyplot as plt
+import pandas as pd
 
 # Connect to the local database
 db_path = Path(__file__).resolve().parents[1] / "database" / "f1_telemetry.db"

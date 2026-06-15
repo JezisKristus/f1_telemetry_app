@@ -1,9 +1,10 @@
 import sqlite3
+
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox,
 )
-from PyQt6.QtCore import Qt
 
 from analytics.setup_evolution import SetupEvolution
 

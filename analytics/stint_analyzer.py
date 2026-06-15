@@ -1,6 +1,6 @@
 import sqlite3
+
 import pandas as pd
-import numpy as np  # Imported for future statistical analysis
 from scipy.stats import linregress
 
 
@@ -69,7 +69,7 @@ class StintAnalyzer:
                 }
 
             # Convert to DataFrame for easier analysis
-            df = pd.DataFrame(laps)
+            df = pd.DataFrame([dict(row) for row in laps])
             df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
 
             # Find fastest lap time
@@ -217,7 +217,7 @@ class StintAnalyzer:
                 }
 
             # Convert to DataFrame for easier analysis
-            df = pd.DataFrame(laps)
+            df = pd.DataFrame([dict(row) for row in laps])
             df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
             df["lap_number"] = range(1, len(df) + 1)
 

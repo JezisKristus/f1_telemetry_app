@@ -1,9 +1,8 @@
-import sqlite3
+import logging
 import os
 import shutil
+import sqlite3
 import time
-import logging
-
 
 logger = logging.getLogger(__name__)
 

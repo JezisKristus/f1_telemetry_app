@@ -1,15 +1,15 @@
-import struct
-import time
-import tempfile
 import os
+import struct
+import tempfile
+import time
 
 import pytest
 
+from analytics.delta_analyzer import DeltaAnalyzer
 from database.db_manager import DBManager
 from telemetry.logger import TelemetryLogger
 from telemetry.packets import HEADER_FMT, HEADER_SIZE, LAP_BLOCK_SIZE, NUM_CARS
 from telemetry.packets.lap_data import parse_lap_packet
-from analytics.delta_analyzer import DeltaAnalyzer
 
 
 def _make_header(packet_id, session_uid=12345, player_index=0):

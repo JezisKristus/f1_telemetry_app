@@ -2,13 +2,12 @@ import pyqtgraph as pg
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, QGroupBox,
 )
-from PyQt6.QtCore import Qt
 
-from analytics.delta_analyzer import DeltaAnalyzer
-from analytics.slip_angle import SlipAngleDetector
-from analytics.setup_evolution import SetupEvolution
-from analytics.session_report import SessionReportExporter
 from analytics.ai_difficulty import AIDifficultyScaler
+from analytics.delta_analyzer import DeltaAnalyzer
+from analytics.session_report import SessionReportExporter
+from analytics.setup_evolution import SetupEvolution
+from analytics.slip_angle import SlipAngleDetector
 
 
 def _format_lap_time(ms):

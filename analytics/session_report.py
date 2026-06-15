@@ -2,9 +2,9 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-from analytics.stint_analyzer import StintAnalyzer
-from analytics.slip_angle import SlipAngleDetector
 from analytics.setup_evolution import SetupEvolution
+from analytics.slip_angle import SlipAngleDetector
+from analytics.stint_analyzer import StintAnalyzer
 
 
 class SessionReportExporter:

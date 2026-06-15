@@ -1,6 +1,4 @@
-import struct
-
-from . import CAR_SETUP_SIZE, NUM_CARS
+from . import CAR_SETUP_SIZE
 
 
 def parse_setup_packet(data: bytes, offset: int, player_index: int):
