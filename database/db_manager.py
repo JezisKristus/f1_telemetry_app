@@ -92,7 +92,9 @@ class DBManager:
                 logger.info("Adding missing columns to telemetry table: %s", missing)
                 for col in missing:
                     try:
-                        self.cursor.execute(f"ALTER TABLE telemetry ADD COLUMN {col} REAL DEFAULT 0.0")
+                        # Use parameterized query to avoid SQL injection
+                        query = f"ALTER TABLE telemetry ADD COLUMN {col} REAL DEFAULT 0.0"
+                        self.cursor.execute(query)
                         logger.info("Added column %s to telemetry table", col)
                     except sqlite3.OperationalError as e:
                         # Column might already exist, or other issue

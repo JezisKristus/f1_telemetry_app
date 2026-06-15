@@ -75,9 +75,17 @@ class TelemetryLogger:
         """Runs in the background, scooping up rows and saving them in massive, fast batches."""
         while True:
             batch = []
-            # Grab up to 200 items from the memory queue at once
-            while not self.db_queue.empty() and len(batch) < 200:
-                batch.append(self.db_queue.get())
+            # Grab up to 200 items from the memory queue at once, with timeout
+            try:
+                while len(batch) < 200:
+                    try:
+                        # Use timeout to prevent busy-waiting
+                        batch.append(self.db_queue.get(timeout=0.01))
+                    except Exception:
+                        # Queue timeout or empty - proceed to flush if we have items
+                        break
+            except Exception:
+                logger.exception("Error retrieving items from queue")
 
             if batch:
                 try:
@@ -87,9 +95,11 @@ class TelemetryLogger:
                     self.db.conn.commit()
                 except Exception:
                     logger.exception("Database bulk-write error")
-            else:
-                # If no data is waiting, rest the thread for 10ms
-                time.sleep(0.01)
+                    # Attempt to rollback to maintain database integrity
+                    try:
+                        self.db.conn.rollback()
+                    except Exception:
+                        logger.exception("Failed to rollback after database error")
 
     def start_listening(self):
         self.is_running = True
@@ -137,9 +147,9 @@ class TelemetryLogger:
         try:
             with self._packet_lock:
                 self.packet_counter += 1
-        except Exception:
-            # best-effort increment
-            self.packet_counter += 1
+        except Exception as e:
+            # Log thread lock issues but don't fail silently
+            logger.warning("Failed to acquire packet lock: %s", e)
         if self.packet_counter % 1200 == 0:
             logger.info("📡 Telemetry flowing perfectly... (%d total packets processed)", self.packet_counter)
 

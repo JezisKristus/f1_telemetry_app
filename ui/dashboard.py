@@ -1,5 +1,6 @@
 import sqlite3
 import pyqtgraph as pg
+import traceback
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView
@@ -7,6 +8,16 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QFont, QColor
 from analytics.stint_analyzer import StintAnalyzer
+
+
+def _format_milliseconds(ms_val) -> str:
+    """Helper to format milliseconds as seconds string or hyphen."""
+    try:
+        if ms_val is None or int(ms_val) == 0:
+            return "-"
+        return f"{(int(ms_val) / 1000.0):.3f} s"
+    except Exception:
+        return "-"
 
 
 class TelemetryDashboard(QMainWindow):
@@ -93,32 +104,31 @@ class TelemetryDashboard(QMainWindow):
         the `laps` table.
         """
         try:
-            conn = sqlite3.connect(self.db_path)
-            cur = conn.cursor()
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.cursor()
 
-            # Update session label from the newest lap's session_uid
-            try:
+                # Update session label from the newest lap's session_uid
+                try:
+                    cur.execute(
+                        "SELECT session_uid FROM laps WHERE session_uid IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+                    )
+                    row = cur.fetchone()
+                    session_uid = row[0] if row and row[0] is not None else "-"
+                except Exception:
+                    session_uid = "-"
+                self.session_label.setText(f"Session: {session_uid}")
+
+                # Fetch latest 15 completed laps (lap_time_ms > 0)
                 cur.execute(
-                    "SELECT session_uid FROM laps WHERE session_uid IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+                    """
+                    SELECT car_index, lap_time_ms, sector_1_ms, sector_2_ms, sector_3_ms
+                    FROM laps
+                    WHERE lap_time_ms > 0
+                    ORDER BY rowid DESC
+                    LIMIT 15
+                    """
                 )
-                row = cur.fetchone()
-                session_uid = row[0] if row and row[0] is not None else "-"
-            except Exception:
-                session_uid = "-"
-            self.session_label.setText(f"Session: {session_uid}")
-
-            # Fetch latest 15 completed laps (lap_time_ms > 0)
-            cur.execute(
-                """
-                SELECT car_index, lap_time_ms, sector_1_ms, sector_2_ms, sector_3_ms
-                FROM laps
-                WHERE lap_time_ms > 0
-                ORDER BY rowid DESC
-                LIMIT 15
-                """
-            )
-            rows = cur.fetchall()
-            conn.close()
+                rows = cur.fetchall()
 
             # Populate table; show newest first (as returned)
             self.table.setRowCount(len(rows))
@@ -130,28 +140,20 @@ class TelemetryDashboard(QMainWindow):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r_idx, 0, item)
 
-                # Helper to format ms -> seconds string or hyphen
-                def fmt(ms_val):
-                    try:
-                        if ms_val is None or int(ms_val) == 0:
-                            return "-"
-                        return f"{(int(ms_val) / 1000.0):.3f} s"
-                    except Exception:
-                        return "-"
-
-                lap_item = QTableWidgetItem(fmt(lap_ms))
+                # Use extracted format function
+                lap_item = QTableWidgetItem(_format_milliseconds(lap_ms))
                 lap_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r_idx, 1, lap_item)
 
-                s1_item = QTableWidgetItem(fmt(s1_ms))
+                s1_item = QTableWidgetItem(_format_milliseconds(s1_ms))
                 s1_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r_idx, 2, s1_item)
 
-                s2_item = QTableWidgetItem(fmt(s2_ms))
+                s2_item = QTableWidgetItem(_format_milliseconds(s2_ms))
                 s2_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r_idx, 3, s2_item)
 
-                s3_item = QTableWidgetItem(fmt(s3_ms))
+                s3_item = QTableWidgetItem(_format_milliseconds(s3_ms))
                 s3_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r_idx, 4, s3_item)
 
@@ -167,7 +169,7 @@ class TelemetryDashboard(QMainWindow):
                         prediction = analyzer.predict_degradation_curve(session_uid, car_index)
 
                         # Update curves if we have enough data (more than 3 valid laps)
-                        if prediction and len(prediction["lap_numbers"]) > 3:
+                        if prediction and len(prediction.get("lap_numbers", [])) > 3:
                             self.actual_time_curve.setData(
                                 x=prediction["lap_numbers"],
                                 y=prediction["actual_times"]
@@ -183,11 +185,13 @@ class TelemetryDashboard(QMainWindow):
                 except Exception as e:
                     # Log degradation analysis error but don't crash the UI
                     print(f"Degradation analysis error: {e}")
+                    print(traceback.format_exc())
 
 
         except Exception as e:
             # Avoid crashing the UI; print for debugging
             print(f"Dashboard update error: {e}")
+            print(traceback.format_exc())
 
     def closeEvent(self, event):
         try:
