@@ -43,8 +43,12 @@ class TrackMapPanel(QWidget):
         if not cars:
             return
 
-        player = next((c for c in cars if c["car_index"] == 0), None)
-        others = [c for c in cars if c["car_index"] != 0]
+        # Determine player car index from live timing (key is the player index used)
+        live_timing = self.logger_obj._live_timing
+        player_index = next(iter(live_timing), 0) if live_timing else 0
+
+        player = next((c for c in cars if c["car_index"] == player_index), None)
+        others = [c for c in cars if c["car_index"] != player_index]
 
         if others:
             spots = [{"pos": (c["x"], c["z"])} for c in others]
@@ -53,7 +57,7 @@ class TrackMapPanel(QWidget):
         if player:
             self.player_scatter.setData([player["x"]], [player["z"]])
 
-        live = self.logger_obj.get_live_timing(0)
+        live = self.logger_obj.get_live_timing(player_index)
         delta_front = live.get("delta_front_ms", 0)
         if delta_front:
             self.gap_label.setText(f"Gap ahead: {delta_front / 1000:.3f}s")

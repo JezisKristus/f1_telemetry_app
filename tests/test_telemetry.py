@@ -70,14 +70,17 @@ class TestLapCompletion:
 
         # Start database worker manually
         import threading
+        import queue as _queue
         def worker():
             while True:
                 try:
-                    query, params = lg.db_queue.get(timeout=0.1)
+                    query, params = lg.db_queue.get(timeout=0.5)
                     db.cursor.execute(query, params)
                     db.conn.commit()
-                except Exception:
+                except _queue.Empty:
                     break
+                except Exception:
+                    pass
         t = threading.Thread(target=worker, daemon=True)
         t.start()
 
@@ -94,7 +97,7 @@ class TestLapCompletion:
         lg._last_sectors[(str(session_uid), 0)] = {"s1": 28000, "s2": 29000}
         lg._prev_lap_num[(str(session_uid), 0)] = 1
         lg._handle_lap_data(header + block2 + b"\x00" * (LAP_BLOCK_SIZE * 19), HEADER_SIZE, 0, session_uid)
-        time.sleep(0.3)
+        t.join(timeout=2.0)
 
         db.cursor.execute(
             "SELECT lap_time_ms, sector_3_ms, is_valid FROM laps WHERE lap_id=?",

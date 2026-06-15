@@ -86,7 +86,7 @@ class TelemetryLogger:
         total = 0
         while self.is_running:
             try:
-                data, _ = self.sock.recvfrom(2048)
+                data, _ = self.sock.recvfrom(4096)
                 total += 1
                 self.last_packet_time = time.time()
 
@@ -133,9 +133,10 @@ class TelemetryLogger:
 
         suid = str(session_uid)
         self.db_queue.put((
-            "INSERT OR IGNORE INTO sessions (session_uid, track_id, weather, ai_difficulty, session_type) "
-            "VALUES (?, 0, 0, 0, 0)",
-            (suid,),
+            "INSERT OR IGNORE INTO sessions "
+            "(session_uid, track_id, weather, ai_difficulty, session_type, player_car_index) "
+            "VALUES (?, 0, 0, 0, 0, ?)",
+            (suid, player_car_index),
         ))
 
         if packet_id == 0:

@@ -1,4 +1,4 @@
-﻿import sqlite3
+import sqlite3
 import os
 import shutil
 import time
@@ -99,6 +99,7 @@ class DBManager:
             for col, typ in [
                 ("track_name", "TEXT DEFAULT ''"),
                 ("session_type_name", "TEXT DEFAULT ''"),
+                ("player_car_index", "INTEGER DEFAULT 0"),
             ]:
                 self._add_column_if_missing("sessions", col, typ)
 
@@ -128,7 +129,8 @@ class DBManager:
                 ai_difficulty INTEGER,
                 session_type INTEGER,
                 track_name TEXT DEFAULT '',
-                session_type_name TEXT DEFAULT ''
+                session_type_name TEXT DEFAULT '',
+                player_car_index INTEGER DEFAULT 0
             )
         ''')
 

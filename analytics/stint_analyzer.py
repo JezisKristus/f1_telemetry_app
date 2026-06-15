@@ -17,205 +17,206 @@ class StintAnalyzer:
         self.db_path = db_path
 
     def get_stint_summary(self, session_uid, car_index):
-         """
-         Get a summary of a stint including lap times and tire degradation.
+        """
+        Get a summary of a stint including lap times and tire degradation.
 
-         Args:
-             session_uid (str): The session unique identifier.
-             car_index (int): The car index.
+        Args:
+            session_uid (str): The session unique identifier.
+            car_index (int): The car index.
 
-         Returns:
-             dict: Dictionary containing stint summary with keys:
-                 - total_laps: Total number of valid laps
-                 - fastest_lap: Fastest lap time in seconds
-                 - average_lap_time: Average lap time in seconds (excluding outliers)
-                 - average_wear_per_lap: Average tire wear per lap
-                 - laps_until_cliff: Estimated laps until tire cliff (70%)
-         """
-         # Connect to database and query laps
-         try:
-             conn = sqlite3.connect(self.db_path)
-             conn.row_factory = sqlite3.Row
-             cursor = conn.cursor()
+        Returns:
+            dict: Dictionary containing stint summary with keys:
+                - total_laps: Total number of valid laps
+                - fastest_lap: Fastest lap time in seconds
+                - average_lap_time: Average lap time in seconds (excluding outliers)
+                - average_wear_per_lap: Average tire wear per lap
+                - laps_until_cliff: Estimated laps until tire cliff (70%)
+        """
+        # Connect to database and query laps
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-             # Query all laps for the session and car where lap_time_ms > 0
-             cursor.execute(
-                 """
-                 SELECT lap_time_ms, wear_end_pct
-                 FROM laps
-                 WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0
-                 ORDER BY rowid
-                 """,
-                 (session_uid, car_index),
-             )
+            # Query all laps for the session and car where lap_time_ms > 0
+            cursor.execute(
+                """
+                SELECT lap_time_ms, wear_end_pct
+                FROM laps
+                WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0 AND is_valid = 1
+                ORDER BY rowid
+                """,
+                (session_uid, car_index),
+            )
 
-             laps = cursor.fetchall()
+            laps = cursor.fetchall()
 
-             if not laps:
-                 # Return empty result if no laps found
-                 return {
-                     "total_laps": 0,
-                     "fastest_lap": None,
-                     "average_lap_time": None,
-                     "average_wear_per_lap": None,
-                     "laps_until_cliff": None,
-                 }
+            if not laps:
+                # Return empty result if no laps found
+                return {
+                    "total_laps": 0,
+                    "fastest_lap": None,
+                    "average_lap_time": None,
+                    "average_wear_per_lap": None,
+                    "laps_until_cliff": None,
+                }
 
-             # Convert to DataFrame for easier analysis
-             df = pd.DataFrame(laps)
-             df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
+            # Convert to DataFrame for easier analysis
+            df = pd.DataFrame(laps)
+            df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
 
-             # Find fastest lap time
-             fastest_lap = df["lap_time_sec"].min()
+            # Find fastest lap time
+            fastest_lap = df["lap_time_sec"].min()
 
-             # Filter out extreme outliers (more than 107% of fastest lap)
-             outlier_threshold = fastest_lap * 1.07
-             df_filtered = df[df["lap_time_sec"] <= outlier_threshold].copy()
+            # Filter out extreme outliers (more than 107% of fastest lap)
+            outlier_threshold = fastest_lap * 1.07
+            df_filtered = df[df["lap_time_sec"] <= outlier_threshold].copy()
 
-             # Calculate average lap time
-             average_lap_time = df_filtered["lap_time_sec"].mean()
+            # Calculate average lap time
+            average_lap_time = df_filtered["lap_time_sec"].mean()
 
-             # Calculate tire degradation using diff()
-             wear_diff = df_filtered["wear_end_pct"].diff()
-             # Skip the first NaN value from diff()
-             valid_wear_diff = wear_diff.dropna()
+            # Calculate tire degradation using diff()
+            wear_diff = df_filtered["wear_end_pct"].diff()
+            # Skip the first NaN value from diff()
+            valid_wear_diff = wear_diff.dropna()
 
-             if len(valid_wear_diff) > 0:
-                 average_wear_per_lap = valid_wear_diff.mean()
-             else:
-                 average_wear_per_lap = 0.0
+            if len(valid_wear_diff) > 0:
+                average_wear_per_lap = valid_wear_diff.mean()
+            else:
+                average_wear_per_lap = 0.0
 
-             # Calculate laps until cliff
-             # Get the latest wear percentage
-             latest_wear = df_filtered["wear_end_pct"].iloc[-1]
-             cliff_threshold = 70.0
-             wear_remaining = cliff_threshold - latest_wear
+            # Calculate laps until cliff
+            # Get the latest wear percentage
+            latest_wear = df_filtered["wear_end_pct"].iloc[-1]
+            cliff_threshold = 70.0
+            wear_remaining = cliff_threshold - latest_wear
 
-             if average_wear_per_lap > 0:
-                 laps_until_cliff = int(wear_remaining / average_wear_per_lap)
-             else:
-                 laps_until_cliff = 999  # Very high number if no degradation
+            if average_wear_per_lap > 0:
+                laps_until_cliff = int(wear_remaining / average_wear_per_lap)
+            else:
+                laps_until_cliff = 999  # Very high number if no degradation
 
-             return {
-                 "total_laps": len(df_filtered),
-                 "fastest_lap": fastest_lap,
-                 "average_lap_time": average_lap_time,
-                 "average_wear_per_lap": average_wear_per_lap,
-                 "laps_until_cliff": laps_until_cliff,
-             }
+            return {
+                "total_laps": len(df_filtered),
+                "fastest_lap": fastest_lap,
+                "average_lap_time": average_lap_time,
+                "average_wear_per_lap": average_wear_per_lap,
+                "laps_until_cliff": laps_until_cliff,
+            }
 
-         except Exception as e:
-             import logging
-             logging.exception("Error in get_stint_summary: %s", e)
-             return {
-                 "total_laps": 0,
-                 "fastest_lap": None,
-                 "average_lap_time": None,
-                 "average_wear_per_lap": None,
-                 "laps_until_cliff": None,
-             }
-         finally:
-             if conn is not None:
-                 conn.close()
+        except Exception as e:
+            import logging
+            logging.exception("Error in get_stint_summary: %s", e)
+            return {
+                "total_laps": 0,
+                "fastest_lap": None,
+                "average_lap_time": None,
+                "average_wear_per_lap": None,
+                "laps_until_cliff": None,
+            }
+        finally:
+            if conn is not None:
+                conn.close()
 
     def predict_degradation_curve(self, session_uid, car_index):
-         """
-         Predict tire degradation curve using linear regression.
+        """
+        Predict tire degradation curve using linear regression.
 
-         Args:
-             session_uid (str): The session unique identifier.
-             car_index (int): The car index.
+        Args:
+            session_uid (str): The session unique identifier.
+            car_index (int): The car index.
 
-         Returns:
-             dict: Dictionary containing:
-                 - lap_numbers: List of lap numbers
-                 - actual_times: List of actual lap times in seconds
-                 - wear_percentages: List of tire wear percentages
-                 - predicted_times: List of predicted lap times in seconds
-                 - time_lost_per_one_percent_wear: The slope (time lost per 1% wear)
-         """
-         conn = None
-         try:
-             conn = sqlite3.connect(self.db_path)
-             conn.row_factory = sqlite3.Row
-             cursor = conn.cursor()
+        Returns:
+            dict: Dictionary containing:
+                - lap_numbers: List of lap numbers
+                - actual_times: List of actual lap times in seconds
+                - wear_percentages: List of tire wear percentages
+                - predicted_times: List of predicted lap times in seconds
+                - time_lost_per_one_percent_wear: The slope (time lost per 1% wear)
+        """
+        conn = None
+        try:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
 
-             # Query all laps for the session and car where lap_time_ms > 0
-             cursor.execute(
-                 """
-                 SELECT lap_time_ms, wear_end_pct
-                 FROM laps
-                 WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0
-                 ORDER BY rowid
-                 """,
-                 (session_uid, car_index),
-             )
+            # Query all laps for the session and car where lap_time_ms > 0
+            cursor.execute(
+                """
+                SELECT lap_time_ms, wear_end_pct
+                FROM laps
+                WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0 AND is_valid = 1
+                ORDER BY rowid
+                """,
+                (session_uid, car_index),
+            )
 
-             laps = cursor.fetchall()
+            laps = cursor.fetchall()
 
-             if not laps or len(laps) < 2:
-                 # Return empty result if fewer than 2 laps found
-                 return {
-                     "lap_numbers": [],
-                     "actual_times": [],
-                     "wear_percentages": [],
-                     "predicted_times": [],
-                     "time_lost_per_one_percent_wear": 0.0,
-                 }
+            if not laps or len(laps) < 2:
+                # Return empty result if fewer than 2 laps found
+                return {
+                    "lap_numbers": [],
+                    "actual_times": [],
+                    "wear_percentages": [],
+                    "predicted_times": [],
+                    "time_lost_per_one_percent_wear": 0.0,
+                }
 
-             # Convert to DataFrame for easier analysis
-             df = pd.DataFrame(laps)
-             df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
-             df["lap_number"] = range(1, len(df) + 1)
+            # Convert to DataFrame for easier analysis
+            df = pd.DataFrame(laps)
+            df["lap_time_sec"] = df["lap_time_ms"] / 1000.0
+            df["lap_number"] = range(1, len(df) + 1)
 
-             # Find fastest lap time
-             fastest_lap = df["lap_time_sec"].min()
+            # Find fastest lap time
+            fastest_lap = df["lap_time_sec"].min()
 
-             # Filter out dirty laps (more than 105% of fastest lap)
-             outlier_threshold = fastest_lap * 1.05
-             df_filtered = df[df["lap_time_sec"] <= outlier_threshold].copy()
+            # Filter out dirty laps (more than 105% of fastest lap)
+            outlier_threshold = fastest_lap * 1.05
+            df_filtered = df[df["lap_time_sec"] <= outlier_threshold].copy()
 
-             if len(df_filtered) < 2:
-                 # Not enough valid data for regression
-                 return {
-                     "lap_numbers": [],
-                     "actual_times": [],
-                     "wear_percentages": [],
-                     "predicted_times": [],
-                     "time_lost_per_one_percent_wear": 0.0,
-                 }
+            if len(df_filtered) < 2:
+                # Not enough valid data for regression
+                return {
+                    "lap_numbers": [],
+                    "actual_times": [],
+                    "wear_percentages": [],
+                    "predicted_times": [],
+                    "time_lost_per_one_percent_wear": 0.0,
+                }
 
-             # Prepare data for linear regression: wear as X, lap time as Y
-             X = df_filtered["wear_end_pct"].values
-             Y = df_filtered["lap_time_sec"].values
+            # Prepare data for linear regression: wear as X, lap time as Y
+            X = df_filtered["wear_end_pct"].values
+            Y = df_filtered["lap_time_sec"].values
 
-             # Run linear regression
-             slope, intercept, r_value, p_value, std_err = linregress(X, Y)
+            # Run linear regression
+            slope, intercept, r_value, p_value, std_err = linregress(X, Y)
 
-             # Calculate predicted lap times
-             predicted_times = slope * X + intercept
+            # Calculate predicted lap times
+            predicted_times = slope * X + intercept
 
-             return {
-                 "lap_numbers": df_filtered["lap_number"].tolist(),
-                 "actual_times": Y.tolist(),
-                 "wear_percentages": X.tolist(),
-                 "predicted_times": predicted_times.tolist(),
-                 "time_lost_per_one_percent_wear": slope,
-             }
+            return {
+                "lap_numbers": df_filtered["lap_number"].tolist(),
+                "actual_times": Y.tolist(),
+                "wear_percentages": X.tolist(),
+                "predicted_times": predicted_times.tolist(),
+                "time_lost_per_one_percent_wear": slope,
+            }
 
-         except Exception as e:
-             import logging
-             logging.exception("Error in predict_degradation_curve: %s", e)
-             return {
-                 "lap_numbers": [],
-                 "actual_times": [],
-                 "wear_percentages": [],
-                 "predicted_times": [],
-                 "time_lost_per_one_percent_wear": 0.0,
-             }
-         finally:
-             if conn is not None:
-                 conn.close()
+        except Exception as e:
+            import logging
+            logging.exception("Error in predict_degradation_curve: %s", e)
+            return {
+                "lap_numbers": [],
+                "actual_times": [],
+                "wear_percentages": [],
+                "predicted_times": [],
+                "time_lost_per_one_percent_wear": 0.0,
+            }
+        finally:
+            if conn is not None:
+                conn.close()
 
 
 if __name__ == "__main__":

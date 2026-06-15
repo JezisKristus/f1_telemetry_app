@@ -73,17 +73,32 @@ class TelemetryDashboard(QMainWindow):
         self.coach_panel.refresh_sessions(session_uid)
 
     def update_ui(self):
-        self.live_panel.update_data()
         self.track_map.update_positions()
 
         try:
             session_uid = self.history_panel.current_session_uid()
-            if not session_uid:
-                with sqlite3.connect(self.db_path) as conn:
-                    cur = conn.cursor()
-                    cur.execute("SELECT session_uid FROM sessions ORDER BY rowid DESC LIMIT 1")
+            player_car_index = 0
+
+            with sqlite3.connect(self.db_path) as conn:
+                cur = conn.cursor()
+                if not session_uid:
+                    cur.execute(
+                        "SELECT session_uid, player_car_index FROM sessions ORDER BY rowid DESC LIMIT 1"
+                    )
                     row = cur.fetchone()
-                    session_uid = row[0] if row else None
+                    if row:
+                        session_uid = row[0]
+                        player_car_index = row[1] if row[1] is not None else 0
+                else:
+                    cur.execute(
+                        "SELECT player_car_index FROM sessions WHERE session_uid = ?",
+                        (session_uid,),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0] is not None:
+                        player_car_index = row[0]
+
+            self.live_panel.update_data(player_car_index)
 
             if session_uid and session_uid != self._session_uid:
                 self._session_uid = session_uid
@@ -91,17 +106,22 @@ class TelemetryDashboard(QMainWindow):
 
             if session_uid:
                 analyzer = StintAnalyzer(self.db_path)
-                prediction = analyzer.predict_degradation_curve(session_uid, 0)
-                if prediction and len(prediction.get("lap_numbers", [])) > 3:
+                prediction = analyzer.predict_degradation_curve(session_uid, player_car_index)
+                lap_numbers = prediction.get("lap_numbers", []) if prediction else []
+                if lap_numbers and len(lap_numbers) > 3:
                     self.actual_time_curve.setData(
-                        x=prediction["lap_numbers"], y=prediction["actual_times"]
+                        x=lap_numbers, y=prediction.get("actual_times", [])
                     )
                     self.predicted_time_curve.setData(
-                        x=prediction["lap_numbers"], y=prediction["predicted_times"]
+                        x=lap_numbers, y=prediction.get("predicted_times", [])
                     )
                     self.wear_curve.setData(
-                        x=prediction["lap_numbers"], y=prediction["wear_percentages"]
+                        x=lap_numbers, y=prediction.get("wear_percentages", [])
                     )
+                else:
+                    self.actual_time_curve.setData(x=[], y=[])
+                    self.predicted_time_curve.setData(x=[], y=[])
+                    self.wear_curve.setData(x=[], y=[])
         except Exception as e:
             print(f"Dashboard update error: {e}")
             print(traceback.format_exc())

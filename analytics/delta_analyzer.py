@@ -24,7 +24,7 @@ class DeltaAnalyzer:
         conn.close()
         return [{"lap_id": r[0], "lap_time_ms": r[1]} for r in rows]
 
-    def get_lap_trace(self, session_uid, lap_id):
+    def get_lap_trace(self, session_uid, lap_id=None):
         conn = sqlite3.connect(self.db_path)
         df = pd.read_sql_query(
             "SELECT lap_distance, throttle, brake, speed, steer FROM telemetry "

@@ -132,7 +132,7 @@ class LivePanel(QWidget):
         self._session_uid = "-"
         self._best_sectors = {"s1": 0, "s2": 0, "s3": 0}
 
-    def update_data(self):
+    def update_data(self, player_car_index=0):
         # Connection health
         if self.logger_obj:
             health = self.logger_obj.get_connection_health()
@@ -143,7 +143,7 @@ class LivePanel(QWidget):
                 self.status_label.setText("● NO TELEMETRY")
                 self.status_label.setStyleSheet("color: #ff4444; font-weight: bold;")
 
-            live = self.logger_obj.get_live_timing(0)
+            live = self.logger_obj.get_live_timing(player_car_index)
             if live:
                 self._update_timing(live)
 
@@ -161,7 +161,7 @@ class LivePanel(QWidget):
                     self.session_info.setText(f"{track} · {stype}")
 
                 if self._session_uid != "-":
-                    summary = self.stint_analyzer.get_stint_summary(self._session_uid, 0)
+                    summary = self.stint_analyzer.get_stint_summary(self._session_uid, player_car_index)
                     cliff = summary.get("laps_until_cliff")
                     self.stint_label.setText(
                         f"Laps: {summary.get('total_laps', 0)} | "
@@ -169,7 +169,7 @@ class LivePanel(QWidget):
                         f"Cliff in: {cliff if cliff else '-'} laps"
                         if summary.get("fastest_lap") else "Laps until cliff: -"
                     )
-                    self._update_alerts(summary)
+                    self._update_alerts(summary, player_car_index)
         except Exception:
             pass
 
@@ -208,11 +208,11 @@ class LivePanel(QWidget):
             if key in wear:
                 self.wear_bars[corner].setValue(int(wear[key]))
 
-    def _update_alerts(self, stint_summary):
+    def _update_alerts(self, stint_summary, player_car_index=0):
         alerts = []
         current_lap = stint_summary.get("total_laps", 0)
 
-        pit = self.pit_calc.calculate(self._session_uid, 0, current_lap)
+        pit = self.pit_calc.calculate(self._session_uid, player_car_index, current_lap)
         if pit:
             alerts.append(pit["message"])
 
@@ -220,12 +220,12 @@ class LivePanel(QWidget):
         if tire_alert:
             alerts.append(tire_alert["message"])
 
-        dirty = self.dirty_air.evaluate(self._session_uid, 0, current_lap)
+        dirty = self.dirty_air.evaluate(self._session_uid, player_car_index, current_lap)
         if dirty:
             alerts.append(dirty["message"])
 
         if self.logger_obj:
-            status = {**self.logger_obj.get_player_status(), **self.logger_obj.get_live_timing(0)}
+            status = {**self.logger_obj.get_player_status(), **self.logger_obj.get_live_timing(player_car_index)}
             for a in self.fuel_ers.evaluate(status):
                 alerts.append(a["message"])
 

@@ -14,9 +14,9 @@ CAR_MOTION_SIZE = 60
 LAP_BLOCK_SIZE = 57
 LAP_STRUCT_FMT = "<IIHBHBHHfIfBB"
 
-# CarTelemetryData — 60 bytes per car (EA pads to 60)
+# CarTelemetryData — 56 bytes per car (struct size matches format)
 CAR_TELEMETRY_FMT = "<HffBbHBBH4H4B4BH4f4B"
-CAR_TELEMETRY_SIZE = 60
+CAR_TELEMETRY_SIZE = 56
 
 # CarStatusData — 60 bytes per car
 CAR_STATUS_FMT = "<BBBBBfffHHBBBBBfBBfffHHBB"
