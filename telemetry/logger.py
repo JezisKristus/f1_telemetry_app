@@ -2,6 +2,7 @@ import socket
 import struct
 import logging
 import sys
+import threading
 
 
 logger = logging.getLogger(__name__)
@@ -18,6 +19,13 @@ class TelemetryLogger:
         # Tell Windows: "If this port was recently used but the program crashed, let me take it over."
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         
+        # Thread-safe counter for number of processed packets. This is incremented
+        # for every valid packet processed by route_packet(). A monitoring
+        # thread can call get_and_reset_packet_count() to obtain the number of
+        # packets seen since the last check.
+        self._packet_lock = threading.Lock()
+        self._packet_count = 0
+
         try:
             self.sock.bind((self.ip, self.port))
             self._is_bound = True
@@ -66,6 +74,14 @@ class TelemetryLogger:
         # Drop any packets that aren't from the correct game format
         if packet_format != 2025:
             return
+
+        # Count this packet (thread-safe)
+        try:
+            with self._packet_lock:
+                self._packet_count += 1
+        except Exception:
+            # Silently ignore counting errors; packet processing should continue
+            pass
 
         # Ensure the session row exists anchors our relational data before writing logs
         # Uses INSERT OR IGNORE so it only runs once per unique session UID
@@ -145,3 +161,14 @@ class TelemetryLogger:
             self.db.conn.commit()
         except Exception as e:
             logger.exception("Database error saving micro-telemetry snapshot: %s", e)
+
+    def get_and_reset_packet_count(self):
+        """Return the number of packets seen since the last call and reset the counter.
+
+        This method is thread-safe and intended for use by monitoring threads.
+        """
+        with self._packet_lock:
+            val = self._packet_count
+            self._packet_count = 0
+            return val
+
