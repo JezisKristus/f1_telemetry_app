@@ -1,89 +1,134 @@
 import sqlite3
-from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel
-from PyQt6.QtCore import QTimer
-import pyqtgraph as pg
+from PyQt6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QLabel,
+    QTableWidget, QTableWidgetItem, QHeaderView
+)
+from PyQt6.QtCore import QTimer, Qt
+from PyQt6.QtGui import QFont
+
 
 class TelemetryDashboard(QMainWindow):
-    def __init__(self, db_path):
+    """Simplified telemetry dashboard.
+
+    Displays the current session UID and a table of recent laps from the
+    `laps` table in the SQLite database pointed to by `db_path`.
+    """
+
+    def __init__(self, db_path: str):
         super().__init__()
         self.db_path = db_path
-        self.setWindowTitle("F1 25 Race Engineer - Live Feed")
-        self.resize(1200, 800)  # Great starting size for a second monitor
+        self.setWindowTitle("F1 Telemetry Dashboard")
+        self.resize(1000, 600)
 
-        # 1. Main Window Setup
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         self.layout = QVBoxLayout(central_widget)
 
-        # 2. Top Bar (Basic Text Metrics)
-        self.top_bar = QHBoxLayout()
-        self.speed_label = QLabel("SPEED: --- km/h")
-        self.gear_label = QLabel("GEAR: -")
-
-        # Make the text big and easy to read
-        font = self.speed_label.font()
-        font.setPointSize(24)
+        # Session label (large, bold)
+        self.session_label = QLabel("Session: -")
+        font = QFont()
+        font.setPointSize(16)
         font.setBold(True)
-        self.speed_label.setFont(font)
-        self.gear_label.setFont(font)
+        self.session_label.setFont(font)
+        self.layout.addWidget(self.session_label)
 
-        self.top_bar.addWidget(self.speed_label)
-        self.top_bar.addWidget(self.gear_label)
-        self.layout.addLayout(self.top_bar)
+        # Table for laps
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels([
+            "Car Index", "Lap Time", "Sector 1", "Sector 2", "Sector 3"
+        ])
+        header = self.table.horizontalHeader()
+        # Stretch columns to fill the available space
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.layout.addWidget(self.table)
 
-        # 3. Live Plotting Area
-        self.plot_widget = pg.PlotWidget(title="Live Micro-Telemetry (Last 10 Seconds)")
-        self.plot_widget.addLegend()
-        self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        self.plot_widget.setYRange(0, 1.1)  # Throttle/Brake are exactly 0.0 to 1.0
-
-        self.throttle_curve = self.plot_widget.plot(pen=pg.mkPen('g', width=2), name='Throttle')
-        self.brake_curve = self.plot_widget.plot(pen=pg.mkPen('r', width=2), name='Brake')
-        self.layout.addWidget(self.plot_widget)
-
-        # 4. Database Connection (Read-Only Polling)
-        self.conn = sqlite3.connect(self.db_path, check_same_thread=False)
-
-        # 5. The Heartbeat Timer (Polls UI at 10Hz)
-        self.timer = QTimer()
+        # Timer for periodic updates (500 ms)
+        self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_ui)
-        self.timer.start(100) # 100 milliseconds
+        self.timer.start(500)
+
+        # Initial population
+        self.update_ui()
 
     def update_ui(self):
+        """Query the DB for the latest 15 laps (lap_time_ms > 0) and update the table.
+
+        Also updates the session label using the most recent session_uid found in
+        the `laps` table.
+        """
         try:
-            cur = self.conn.cursor()
-            # Grab the last ~10 seconds of telemetry at 30Hz
-            cur.execute('''
-                SELECT lap_distance, throttle, brake, speed, gear 
-                FROM telemetry 
-                ORDER BY id DESC LIMIT 300
-            ''')
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+
+            # Update session label from the newest lap's session_uid
+            try:
+                cur.execute(
+                    "SELECT session_uid FROM laps WHERE session_uid IS NOT NULL ORDER BY rowid DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                session_uid = row[0] if row and row[0] is not None else "-"
+            except Exception:
+                session_uid = "-"
+            self.session_label.setText(f"Session: {session_uid}")
+
+            # Fetch latest 15 completed laps (lap_time_ms > 0)
+            cur.execute(
+                """
+                SELECT car_index, lap_time_ms, sector_1_ms, sector_2_ms, sector_3_ms
+                FROM laps
+                WHERE lap_time_ms > 0
+                ORDER BY rowid DESC
+                LIMIT 15
+                """
+            )
             rows = cur.fetchall()
+            conn.close()
 
-            if not rows:
-                return
+            # Populate table; show newest first (as returned)
+            self.table.setRowCount(len(rows))
+            for r_idx, row in enumerate(rows):
+                car_index, lap_ms, s1_ms, s2_ms, s3_ms = row
 
-            # Reverse rows so they plot chronologically (left to right)
-            rows.reverse()
+                # Car Index
+                item = QTableWidgetItem(str(car_index if car_index is not None else "-"))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r_idx, 0, item)
 
-            # Update Live Text (Grab the absolute newest row at the end of the array)
-            latest = rows[-1]
-            self.speed_label.setText(f"SPEED: {latest[3]} km/h")
-            self.gear_label.setText(f"GEAR: {latest[4]}")
+                # Helper to format ms -> seconds string or hyphen
+                def fmt(ms_val):
+                    try:
+                        if ms_val is None or int(ms_val) == 0:
+                            return "-"
+                        return f"{(int(ms_val) / 1000.0):.3f} s"
+                    except Exception:
+                        return "-"
 
-            # Update Live Plot
-            distances = [r[0] for r in rows]
-            throttles = [r[1] for r in rows]
-            brakes = [r[2] for r in rows]
+                lap_item = QTableWidgetItem(fmt(lap_ms))
+                lap_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r_idx, 1, lap_item)
 
-            self.throttle_curve.setData(distances, throttles)
-            self.brake_curve.setData(distances, brakes)
+                s1_item = QTableWidgetItem(fmt(s1_ms))
+                s1_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r_idx, 2, s1_item)
+
+                s2_item = QTableWidgetItem(fmt(s2_ms))
+                s2_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r_idx, 3, s2_item)
+
+                s3_item = QTableWidgetItem(fmt(s3_ms))
+                s3_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.table.setItem(r_idx, 4, s3_item)
 
         except Exception as e:
-            print(f"UI Update Error: {e}")
+            # Avoid crashing the UI; print for debugging
+            print(f"Dashboard update error: {e}")
 
     def closeEvent(self, event):
-        # Cleanly close the database connection if you click the X button
-        self.conn.close()
+        try:
+            if self.timer.isActive():
+                self.timer.stop()
+        except Exception:
+            pass
         event.accept()
 
