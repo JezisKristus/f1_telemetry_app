@@ -53,6 +53,7 @@ class TelemetryLogger:
         self.db_queue = queue.Queue()
         # Packet counter and lock for monitor access (heartbeat)
         self.packet_counter = 0
+        self.player_lap_distance = 0.0  # <--- Track lap distance from Packet 2
         self._packet_lock = threading.Lock()
 
         # Diagnostic counts per packet id
@@ -183,16 +184,27 @@ class TelemetryLogger:
             return
 
         try:
+            # We need to unpack up to the 9th variable to reach the float for lapDistance
+            # I=lastLap, I=currentLap, H=sec1MS, B=sec1Min, H=sec2MS, B=sec2Min, H=deltaFront, H=deltaLeader, f=lapDistance
+            lap_struct_fmt = "<IIHBHBHHf"
+
             for car_idx in range(NUM_CARS):
                 car_offset = offset + (car_idx * LAP_BLOCK_SIZE)
-                last_lap_ms, current_lap_ms = struct.unpack_from(LAP_CORE_FMT, data, car_offset)
+                chunk = data[car_offset: car_offset + struct.calcsize(lap_struct_fmt)]
+                lap_data = struct.unpack(lap_struct_fmt, chunk)
+
+                current_lap_time = lap_data[1]
+
+                # If this is YOUR car, update the memory variable
+                if car_idx == player_index:
+                    self.player_lap_distance = lap_data[8]
 
                 lap_id = f"{session_uid}_{car_idx}"
 
                 # Enqueue individual row — worker will batch-commit
                 self.db_queue.put((
                     "INSERT OR REPLACE INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, sector_3_ms, tire_compound, wear_end_pct, lap_time_ms) VALUES (?, ?, ?, 0, 0, 0, 0, 0.0, ?)",
-                    (lap_id, str(session_uid), car_idx, current_lap_ms)
+                    (lap_id, str(session_uid), car_idx, current_lap_time)
                 ))
 
         except struct.error:
@@ -231,8 +243,8 @@ class TelemetryLogger:
 
             # Enqueue the telemetry row; background worker will commit
             self.db_queue.put((
-                "INSERT INTO telemetry (session_uid, lap_distance, throttle, brake, speed, steer, gear) VALUES (?, 0.0, ?, ?, ?, ?, ?)",
-                (str(session_uid), throttle, brake, speed, steer, gear),
+                "INSERT INTO telemetry (session_uid, lap_distance, throttle, brake, speed, steer, gear) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (str(session_uid), self.player_lap_distance, throttle, brake, speed, steer, gear),
             ))
 
         except struct.error:
