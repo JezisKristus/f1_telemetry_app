@@ -329,6 +329,17 @@ class TelemetryLogger:
              telem["temp_core_fl"], telem["temp_core_fr"], telem["temp_core_rl"], telem["temp_core_rr"]),
         ))
 
+        with self._packet_lock:
+            if player_index in self._live_timing:
+                self._live_timing[player_index]["temp_sur_fl"] = telem.get("temp_sur_fl", 0.0)
+                self._live_timing[player_index]["temp_sur_fr"] = telem.get("temp_sur_fr", 0.0)
+                self._live_timing[player_index]["temp_sur_rl"] = telem.get("temp_sur_rl", 0.0)
+                self._live_timing[player_index]["temp_sur_rr"] = telem.get("temp_sur_rr", 0.0)
+                self._live_timing[player_index]["temp_core_fl"] = telem.get("temp_core_fl", 0.0)
+                self._live_timing[player_index]["temp_core_fr"] = telem.get("temp_core_fr", 0.0)
+                self._live_timing[player_index]["temp_core_rl"] = telem.get("temp_core_rl", 0.0)
+                self._live_timing[player_index]["temp_core_rr"] = telem.get("temp_core_rr", 0.0)
+
     def _handle_car_status(self, data, offset, player_index, session_uid):
         status = parse_car_status(data, offset, player_index)
         if not status:

@@ -30,7 +30,10 @@ class StintAnalyzer:
                 - fastest_lap: Fastest lap time in seconds
                 - average_lap_time: Average lap time in seconds (excluding outliers)
                 - average_wear_per_lap: Average tire wear per lap
-                - laps_until_cliff: Estimated laps until tire cliff (70%)
+                - laps_until_cliff: Estimated laps until tire cliff (70%) based on the limiting tire
+                - limiting_corner: The corner name (FL, FR, RL, RR) that will hit the cliff first
+                - wear_rates: Dict of average wear per lap for each corner
+                - temps: Dict of average surface/core temperatures per corner
         """
         # Connect to database and query laps
         conn = None
@@ -42,7 +45,7 @@ class StintAnalyzer:
             # Query all laps for the session and car where lap_time_ms > 0
             cursor.execute(
                 """
-                SELECT lap_time_ms, wear_end_pct
+                SELECT lap_time_ms, wear_end_pct, wear_fl, wear_fr, wear_rl, wear_rr
                 FROM laps
                 WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0 AND is_valid = 1
                 ORDER BY rowid
@@ -60,6 +63,9 @@ class StintAnalyzer:
                     "average_lap_time": None,
                     "average_wear_per_lap": None,
                     "laps_until_cliff": None,
+                    "limiting_corner": None,
+                    "wear_rates": {"wear_fl": 0.0, "wear_fr": 0.0, "wear_rl": 0.0, "wear_rr": 0.0},
+                    "temps": {},
                 }
 
             # Convert to DataFrame for easier analysis
@@ -86,16 +92,48 @@ class StintAnalyzer:
             else:
                 average_wear_per_lap = 0.0
 
-            # Calculate laps until cliff
-            # Get the latest wear percentage
-            latest_wear = df_filtered["wear_end_pct"].iloc[-1]
-            cliff_threshold = 70.0
-            wear_remaining = cliff_threshold - latest_wear
+            # Calculate wear rates and laps until cliff for each corner
+            wear_rates = {}
+            laps_until_cliff_corners = {}
+            for corner in ["wear_fl", "wear_fr", "wear_rl", "wear_rr"]:
+                diffs = df_filtered[corner].diff().dropna()
+                rate = diffs.mean() if len(diffs) > 0 else 0.0
+                wear_rates[corner] = rate
+                
+                latest_corner_wear = df_filtered[corner].iloc[-1]
+                wear_remaining = 70.0 - latest_corner_wear
+                if rate > 0:
+                    laps_until_cliff_corners[corner] = int(wear_remaining / rate)
+                else:
+                    laps_until_cliff_corners[corner] = 999
 
-            if average_wear_per_lap > 0:
-                laps_until_cliff = int(wear_remaining / average_wear_per_lap)
-            else:
-                laps_until_cliff = 999  # Very high number if no degradation
+            # Determine the limiting tire (the one with the lowest laps until cliff)
+            limiting_corner = min(laps_until_cliff_corners, key=laps_until_cliff_corners.get)
+            laps_until_cliff = laps_until_cliff_corners[limiting_corner]
+            limiting_corner_name = limiting_corner.split("_")[1].upper()
+
+            # Query average surface and core temperatures for each corner
+            cursor.execute(
+                """
+                SELECT 
+                    AVG(temp_sur_fl) as avg_sur_fl, AVG(temp_sur_fr) as avg_sur_fr,
+                    AVG(temp_sur_rl) as avg_sur_rl, AVG(temp_sur_rr) as avg_sur_rr,
+                    AVG(temp_core_fl) as avg_core_fl, AVG(temp_core_fr) as avg_core_fr,
+                    AVG(temp_core_rl) as avg_core_rl, AVG(temp_core_rr) as avg_core_rr
+                FROM telemetry
+                WHERE session_uid = ?
+                """,
+                (session_uid,),
+            )
+            temp_row = cursor.fetchone()
+            temps = {}
+            if temp_row:
+                temps = {
+                    "temp_sur_fl": temp_row["avg_sur_fl"], "temp_sur_fr": temp_row["avg_sur_fr"],
+                    "temp_sur_rl": temp_row["avg_sur_rl"], "temp_sur_rr": temp_row["avg_sur_rr"],
+                    "temp_core_fl": temp_row["avg_core_fl"], "temp_core_fr": temp_row["avg_core_fr"],
+                    "temp_core_rl": temp_row["avg_core_rl"], "temp_core_rr": temp_row["avg_core_rr"],
+                }
 
             return {
                 "total_laps": len(df_filtered),
@@ -103,6 +141,9 @@ class StintAnalyzer:
                 "average_lap_time": average_lap_time,
                 "average_wear_per_lap": average_wear_per_lap,
                 "laps_until_cliff": laps_until_cliff,
+                "limiting_corner": limiting_corner_name,
+                "wear_rates": wear_rates,
+                "temps": temps,
             }
 
         except Exception as e:
@@ -114,6 +155,9 @@ class StintAnalyzer:
                 "average_lap_time": None,
                 "average_wear_per_lap": None,
                 "laps_until_cliff": None,
+                "limiting_corner": None,
+                "wear_rates": {"wear_fl": 0.0, "wear_fr": 0.0, "wear_rl": 0.0, "wear_rr": 0.0},
+                "temps": {},
             }
         finally:
             if conn is not None:
@@ -134,6 +178,10 @@ class StintAnalyzer:
                 - wear_percentages: List of tire wear percentages
                 - predicted_times: List of predicted lap times in seconds
                 - time_lost_per_one_percent_wear: The slope (time lost per 1% wear)
+                - wear_fl: List of historical wear percentages for FL corner
+                - wear_fr: List of historical wear percentages for FR corner
+                - wear_rl: List of historical wear percentages for RL corner
+                - wear_rr: List of historical wear percentages for RR corner
         """
         conn = None
         try:
@@ -144,7 +192,7 @@ class StintAnalyzer:
             # Query all laps for the session and car where lap_time_ms > 0
             cursor.execute(
                 """
-                SELECT lap_time_ms, wear_end_pct
+                SELECT lap_time_ms, wear_end_pct, wear_fl, wear_fr, wear_rl, wear_rr
                 FROM laps
                 WHERE session_uid = ? AND car_index = ? AND lap_time_ms > 0 AND is_valid = 1
                 ORDER BY rowid
@@ -162,6 +210,10 @@ class StintAnalyzer:
                     "wear_percentages": [],
                     "predicted_times": [],
                     "time_lost_per_one_percent_wear": 0.0,
+                    "wear_fl": [],
+                    "wear_fr": [],
+                    "wear_rl": [],
+                    "wear_rr": [],
                 }
 
             # Convert to DataFrame for easier analysis
@@ -184,6 +236,10 @@ class StintAnalyzer:
                     "wear_percentages": [],
                     "predicted_times": [],
                     "time_lost_per_one_percent_wear": 0.0,
+                    "wear_fl": [],
+                    "wear_fr": [],
+                    "wear_rl": [],
+                    "wear_rr": [],
                 }
 
             # Prepare data for linear regression: wear as X, lap time as Y
@@ -202,6 +258,10 @@ class StintAnalyzer:
                 "wear_percentages": X.tolist(),
                 "predicted_times": predicted_times.tolist(),
                 "time_lost_per_one_percent_wear": slope,
+                "wear_fl": df_filtered["wear_fl"].tolist(),
+                "wear_fr": df_filtered["wear_fr"].tolist(),
+                "wear_rl": df_filtered["wear_rl"].tolist(),
+                "wear_rr": df_filtered["wear_rr"].tolist(),
             }
 
         except Exception as e:

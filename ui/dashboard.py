@@ -50,10 +50,19 @@ class TelemetryDashboard(QMainWindow):
         self.degradation_plot.getPlotItem().vb.sigResized.connect(self._update_right_axis_geometry)
         self.actual_time_curve = pg.PlotCurveItem(pen=pg.mkPen(color="white", width=2))
         self.predicted_time_curve = pg.PlotCurveItem(pen=pg.mkPen(color="red", width=2, style=Qt.PenStyle.DashLine))
-        self.wear_curve = pg.PlotCurveItem(pen=pg.mkPen(color="cyan", width=2))
+        self.wear_curve = pg.PlotCurveItem(pen=pg.mkPen(color="cyan", width=2, style=Qt.PenStyle.DashLine))
+        self.wear_fl_curve = pg.PlotCurveItem(pen=pg.mkPen(color="#ff6b6b", width=1.5))
+        self.wear_fr_curve = pg.PlotCurveItem(pen=pg.mkPen(color="#feca57", width=1.5))
+        self.wear_rl_curve = pg.PlotCurveItem(pen=pg.mkPen(color="#1dd1a1", width=1.5))
+        self.wear_rr_curve = pg.PlotCurveItem(pen=pg.mkPen(color="#48dbfb", width=1.5))
+        
         self.degradation_plot.addItem(self.actual_time_curve)
         self.degradation_plot.addItem(self.predicted_time_curve)
         self.right_axis.addItem(self.wear_curve)
+        self.right_axis.addItem(self.wear_fl_curve)
+        self.right_axis.addItem(self.wear_fr_curve)
+        self.right_axis.addItem(self.wear_rl_curve)
+        self.right_axis.addItem(self.wear_rr_curve)
         self.live_panel.layout().addWidget(self.degradation_plot)
 
         self.history_panel.session_changed = self._on_session_selected
@@ -118,10 +127,26 @@ class TelemetryDashboard(QMainWindow):
                     self.wear_curve.setData(
                         x=lap_numbers, y=prediction.get("wear_percentages", [])
                     )
+                    self.wear_fl_curve.setData(
+                        x=lap_numbers, y=prediction.get("wear_fl", [])
+                    )
+                    self.wear_fr_curve.setData(
+                        x=lap_numbers, y=prediction.get("wear_fr", [])
+                    )
+                    self.wear_rl_curve.setData(
+                        x=lap_numbers, y=prediction.get("wear_rl", [])
+                    )
+                    self.wear_rr_curve.setData(
+                        x=lap_numbers, y=prediction.get("wear_rr", [])
+                    )
                 else:
                     self.actual_time_curve.setData(x=[], y=[])
                     self.predicted_time_curve.setData(x=[], y=[])
                     self.wear_curve.setData(x=[], y=[])
+                    self.wear_fl_curve.setData(x=[], y=[])
+                    self.wear_fr_curve.setData(x=[], y=[])
+                    self.wear_rl_curve.setData(x=[], y=[])
+                    self.wear_rr_curve.setData(x=[], y=[])
         except Exception as e:
             print(f"Dashboard update error: {e}")
             print(traceback.format_exc())

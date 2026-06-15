@@ -163,10 +163,14 @@ class LivePanel(QWidget):
                 if self._session_uid != "-":
                     summary = self.stint_analyzer.get_stint_summary(self._session_uid, player_car_index)
                     cliff = summary.get("laps_until_cliff")
+                    limiting = summary.get("limiting_corner")
+                    rates = summary.get("wear_rates", {})
+                    rates_str = f"FL:{rates.get('wear_fl', 0.0):.2f}% FR:{rates.get('wear_fr', 0.0):.2f}% RL:{rates.get('wear_rl', 0.0):.2f}% RR:{rates.get('wear_rr', 0.0):.2f}%"
                     self.stint_label.setText(
                         f"Laps: {summary.get('total_laps', 0)} | "
                         f"Fastest: {summary.get('fastest_lap', 0):.3f}s | "
-                        f"Cliff in: {cliff if cliff else '-'} laps"
+                        f"Cliff in: {cliff if cliff else '-'} laps ({limiting if limiting else '-'}) | "
+                        f"Wear Rates: {rates_str}"
                         if summary.get("fastest_lap") else "Laps until cliff: -"
                     )
                     self._update_alerts(summary, player_car_index)
@@ -207,6 +211,20 @@ class LivePanel(QWidget):
         for corner, key in [("fl", "wear_fl"), ("fr", "wear_fr"), ("rl", "wear_rl"), ("rr", "wear_rr")]:
             if key in wear:
                 self.wear_bars[corner].setValue(int(wear[key]))
+
+        sur_fl = live.get("temp_sur_fl", 0)
+        sur_fr = live.get("temp_sur_fr", 0)
+        sur_rl = live.get("temp_sur_rl", 0)
+        sur_rr = live.get("temp_sur_rr", 0)
+        core_fl = live.get("temp_core_fl", 0)
+        core_fr = live.get("temp_core_fr", 0)
+        core_rl = live.get("temp_core_rl", 0)
+        core_rr = live.get("temp_core_rr", 0)
+        if sur_fl or sur_fr or core_fl:
+            self.temp_label.setText(
+                f"Surface: FL {sur_fl:.0f}°C FR {sur_fr:.0f}°C RL {sur_rl:.0f}°C RR {sur_rr:.0f}°C | "
+                f"Core: FL {core_fl:.0f}°C FR {core_fr:.0f}°C RL {core_rl:.0f}°C RR {core_rr:.0f}°C"
+            )
 
     def _update_alerts(self, stint_summary, player_car_index=0):
         alerts = []
