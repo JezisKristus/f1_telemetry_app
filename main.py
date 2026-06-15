@@ -1,5 +1,5 @@
 from database.db_manager import DBManager
-from logger.udp_server import TelemetryLogger
+from telemetry.logger import TelemetryLogger
 import threading
 
 if __name__ == "__main__":
