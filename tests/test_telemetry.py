@@ -129,3 +129,47 @@ class TestSchemaMigrations:
         cols = {row[1] for row in db.cursor.fetchall()}
         for col in ("session_time", "drs", "ers_mode"):
             assert col in cols
+
+        db.cursor.execute("PRAGMA table_info(sessions)")
+        cols = {row[1] for row in db.cursor.fetchall()}
+        assert "teammate_car_index" in cols
+
+
+class TestAIDifficulty:
+    def test_difficulty_scaling_high_end(self, temp_db):
+        db, path = temp_db
+        from analytics.ai_difficulty import AIDifficultyScaler
+        scaler = AIDifficultyScaler(path)
+
+        # Set up a session with difficulty 105 (> 100)
+        db.cursor.execute(
+            "INSERT INTO sessions (session_uid, track_id, weather, ai_difficulty, session_type) "
+            "VALUES (?, 0, 0, 105, 0)",
+            ("session_high_diff",)
+        )
+        
+        # Player lap
+        db.cursor.execute(
+            "INSERT INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, sector_3_ms, lap_time_ms, is_valid) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            ("lap_p", "session_high_diff", 0, 29000, 30000, 31000, 90000)
+        )
+        
+        # AI teammate lap
+        db.cursor.execute(
+            "INSERT INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, sector_3_ms, lap_time_ms, is_valid) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, 1)",
+            ("lap_ai", "session_high_diff", 1, 28000, 30000, 31000, 89000)
+        )
+        
+        db.cursor.execute(
+            "UPDATE sessions SET teammate_car_index=1 WHERE session_uid='session_high_diff'"
+        )
+        db.conn.commit()
+
+        recs = scaler.analyze("session_high_diff", 0)
+        assert recs is not None
+        # Sector 1 has 1000ms delta (1.0s). At difficulty > 100, 1 click = 200ms, so 1000 / 200 = 5 clicks.
+        s1_rec = next(r for r in recs if r["sector"] == "Sector 1")
+        assert "5 clicks" in s1_rec["message"]
+

@@ -144,6 +144,8 @@ class TelemetryLogger:
             self._handle_session_data(data, HEADER_SIZE, session_uid)
         elif packet_id == 2:
             self._handle_lap_data(data, HEADER_SIZE, player_car_index, session_uid)
+        elif packet_id == 4:
+            self._handle_participants(data, HEADER_SIZE, player_car_index, session_uid)
         elif packet_id == 5:
             self._handle_car_setup(data, HEADER_SIZE, player_car_index, session_uid)
         elif packet_id == 6:
@@ -207,10 +209,10 @@ class TelemetryLogger:
         if not session:
             return
         self.db_queue.put((
-            "UPDATE sessions SET track_id=?, weather=?, session_type=?, track_name=?, session_type_name=? "
+            "UPDATE sessions SET track_id=?, weather=?, session_type=?, track_name=?, session_type_name=?, ai_difficulty=? "
             "WHERE session_uid=?",
             (session["track_id"], session["weather"], session["session_type"],
-             session["track_name"], session["session_type_name"], str(session_uid)),
+             session["track_name"], session["session_type_name"], session["ai_difficulty"], str(session_uid)),
         ))
 
     def _handle_lap_data(self, data, offset, player_index, session_uid):
@@ -249,12 +251,17 @@ class TelemetryLogger:
             prev_lap_num = self._prev_lap_num.get(state_key, 0)
             prev_last_lap = self._last_lap_time.get(state_key, 0)
 
-            # In-progress lap row (updated every packet)
+            # In-progress lap row (updated every packet) - UPSERT to preserve wear columns
             in_progress_id = f"{suid}_{car_idx}_{current_lap_num}"
             self.db_queue.put((
-                "INSERT OR REPLACE INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, "
+                "INSERT INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, "
                 "sector_3_ms, tire_compound, wear_end_pct, lap_time_ms, position, delta_front_ms, is_valid) "
-                "VALUES (?, ?, ?, ?, ?, 0, 0, 0.0, 0, ?, ?, 0)",
+                "VALUES (?, ?, ?, ?, ?, 0, 0, 0.0, 0, ?, ?, 0) "
+                "ON CONFLICT(lap_id) DO UPDATE SET "
+                "sector_1_ms=excluded.sector_1_ms, "
+                "sector_2_ms=excluded.sector_2_ms, "
+                "position=excluded.position, "
+                "delta_front_ms=excluded.delta_front_ms",
                 (in_progress_id, suid, car_idx, sector_1, sector_2,
                  car["position"], car["delta_front_ms"]),
             ))
@@ -283,9 +290,18 @@ class TelemetryLogger:
                 completed_id = f"{suid}_{car_idx}_{completed_lap_num}"
                 compound = self._player_status.get("compound", 0) if car_idx == player_index else 0
                 self.db_queue.put((
-                    "INSERT OR REPLACE INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, "
+                    "INSERT INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, "
                     "sector_3_ms, tire_compound, lap_time_ms, position, delta_front_ms, is_valid) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1) "
+                    "ON CONFLICT(lap_id) DO UPDATE SET "
+                    "sector_1_ms=excluded.sector_1_ms, "
+                    "sector_2_ms=excluded.sector_2_ms, "
+                    "sector_3_ms=excluded.sector_3_ms, "
+                    "tire_compound=case when excluded.tire_compound > 0 then excluded.tire_compound else laps.tire_compound end, "
+                    "lap_time_ms=excluded.lap_time_ms, "
+                    "position=excluded.position, "
+                    "delta_front_ms=excluded.delta_front_ms, "
+                    "is_valid=1",
                     (completed_id, suid, car_idx, completed_s1, completed_s2, sector_3, compound,
                      completed_time, car["position"], car["delta_front_ms"]),
                 ))
@@ -381,3 +397,35 @@ class TelemetryLogger:
         with self._packet_lock:
             if player_index in self._live_timing:
                 self._live_timing[player_index]["wear"] = damage
+
+    def _handle_participants(self, data, offset, player_index, session_uid):
+        header = struct.unpack(HEADER_FMT, data[:HEADER_SIZE])
+        game_year = header[1]
+        part_size = 57 if game_year == 25 else 58
+
+        if len(data) < offset + 1:
+            return
+        num_active_cars = data[offset]
+
+        player_offset = offset + 1 + player_index * part_size
+        if len(data) < player_offset + 5:
+            return
+        player_team_id = data[player_offset + 3]
+
+        teammate_index = -1
+        for car_idx in range(num_active_cars):
+            if car_idx == player_index:
+                continue
+            car_offset = offset + 1 + car_idx * part_size
+            if len(data) < car_offset + 5:
+                break
+            team_id = data[car_offset + 3]
+            if team_id == player_team_id:
+                teammate_index = car_idx
+                break
+
+        if teammate_index != -1:
+            self.db_queue.put((
+                "UPDATE sessions SET teammate_car_index=? WHERE session_uid=?",
+                (teammate_index, str(session_uid)),
+            ))

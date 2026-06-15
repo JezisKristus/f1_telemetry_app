@@ -24,12 +24,37 @@ class DirtyAirMonitor:
         if len(rows) < self.lap_threshold:
             return None
 
-        if all(r[0] > 0 and r[0] < self.delta_threshold_ms for r in rows):
+        is_trailing = all(r[0] > 0 and r[0] < self.delta_threshold_ms for r in rows)
+        if is_trailing:
+            understeer_detected = False
+            conn = sqlite3.connect(self.db_path)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT steer, g_lat FROM telemetry WHERE session_uid=? ORDER BY id DESC LIMIT 100",
+                (session_uid,),
+            )
+            telems = cur.fetchall()
+            conn.close()
+            
+            if telems:
+                corner_count = 0
+                understeer_count = 0
+                for steer_val, g_lat_val in telems:
+                    if steer_val and abs(steer_val) > 0.2:
+                        corner_count += 1
+                        if g_lat_val and abs(g_lat_val) < 1.2:
+                            understeer_count += 1
+                if corner_count > 5 and (understeer_count / corner_count) > 0.5:
+                    understeer_detected = True
+
             undercut_lap = max(1, current_lap - 1)
+            msg = f"Dirty air — consider undercut Lap {undercut_lap}"
+            if understeer_detected:
+                msg += " (understeer detected)"
             return {
                 "dirty_air": True,
                 "wear_multiplier": self.wear_multiplier,
-                "message": f"Dirty air — consider undercut Lap {undercut_lap}",
+                "message": msg,
                 "severity": "warning",
             }
         return None

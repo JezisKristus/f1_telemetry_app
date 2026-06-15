@@ -24,4 +24,5 @@ def parse_session_packet(data: bytes, offset: int):
         "track_id": track_id,
         "track_name": TRACK_NAMES.get(track_id, f"Track {track_id}"),
         "session_type_name": SESSION_TYPE_NAMES.get(session_type, "Unknown"),
+        "ai_difficulty": data[offset + 128] if len(data) >= offset + 129 else 0,
     }
