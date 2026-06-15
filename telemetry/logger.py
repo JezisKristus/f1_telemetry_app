@@ -122,8 +122,9 @@ class TelemetryLogger:
 
         try:
             # Compact SQL to avoid static analysis issues; commit the micro-telemetry snapshot
+            # Note: yaw and g_forces use DEFAULT 0.0 from schema, so no need to specify them
             self.db.cursor.execute(
-                "INSERT INTO telemetry (session_uid, lap_distance, throttle, brake, speed, steer, gear, yaw, g_forces) VALUES (?, 0.0, ?, ?, ?, ?, ?, 0.0, 0.0)",
+                "INSERT INTO telemetry (session_uid, lap_distance, throttle, brake, speed, steer, gear) VALUES (?, 0.0, ?, ?, ?, ?, ?)",
                 (str(session_uid), throttle, brake, speed, steer, gear),
             )
             self.db.conn.commit()

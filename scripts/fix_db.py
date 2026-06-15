@@ -40,8 +40,8 @@ cur.execute('''
         speed INTEGER,
         steer REAL,
         gear INTEGER,
-        yaw REAL,
-        g_forces REAL
+        yaw REAL DEFAULT 0.0,
+        g_forces REAL DEFAULT 0.0
     )
 ''')
 
