@@ -65,9 +65,41 @@ class DBManager:
             if not required.issubset(existing):
                 logger.info("Missing tables detected (%s). Creating tables...", required - existing)
                 self.setup_tables()
+            else:
+                # Tables exist, but check if we need to add missing columns (schema migration)
+                self._migrate_telemetry_schema()
         except sqlite3.DatabaseError:
             # Propagate to caller to handle (e.g. treat as corruption)
             raise
+
+    def _migrate_telemetry_schema(self):
+        """Add missing columns to telemetry table if they don't exist."""
+        try:
+            cur = self.cursor
+            # Get existing columns in telemetry table
+            cur.execute("PRAGMA table_info(telemetry)")
+            existing_columns = {row[1] for row in cur.fetchall()}
+
+            # Define the columns we need
+            required_columns = {
+                "temp_sur_fl", "temp_sur_fr", "temp_sur_rl", "temp_sur_rr",
+                "temp_core_fl", "temp_core_fr", "temp_core_rl", "temp_core_rr"
+            }
+
+            # Add missing columns
+            missing = required_columns - existing_columns
+            if missing:
+                logger.info("Adding missing columns to telemetry table: %s", missing)
+                for col in missing:
+                    try:
+                        self.cursor.execute(f"ALTER TABLE telemetry ADD COLUMN {col} REAL DEFAULT 0.0")
+                        logger.info("Added column %s to telemetry table", col)
+                    except sqlite3.OperationalError as e:
+                        # Column might already exist, or other issue
+                        logger.warning("Could not add column %s: %s", col, e)
+                self.conn.commit()
+        except Exception:
+            logger.exception("Error during telemetry schema migration")
 
     def setup_tables(self):
         # Master session data
@@ -108,7 +140,15 @@ class DBManager:
                 steer REAL,
                 gear INTEGER,
                 yaw REAL DEFAULT 0.0,
-                g_forces REAL DEFAULT 0.0
+                g_forces REAL DEFAULT 0.0,
+                temp_sur_fl REAL DEFAULT 0.0,
+                temp_sur_fr REAL DEFAULT 0.0,
+                temp_sur_rl REAL DEFAULT 0.0,
+                temp_sur_rr REAL DEFAULT 0.0,
+                temp_core_fl REAL DEFAULT 0.0,
+                temp_core_fr REAL DEFAULT 0.0,
+                temp_core_rl REAL DEFAULT 0.0,
+                temp_core_rr REAL DEFAULT 0.0
             )
         ''')
 

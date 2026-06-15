@@ -155,6 +155,8 @@ class TelemetryLogger:
             self._handle_lap_data(data, HEADER_SIZE, player_car_index, session_uid)
         elif packet_id == 6:
             self._handle_car_telemetry(data, HEADER_SIZE, player_car_index, session_uid)
+        elif packet_id == 10:
+            self._handle_car_damage(data, HEADER_SIZE, player_car_index, session_uid)
 
     def get_and_reset_packet_count(self):
         """Return number of packets seen since last call and reset the counter.
@@ -184,9 +186,11 @@ class TelemetryLogger:
             return
 
         try:
-            # We need to unpack up to the 9th variable to reach the float for lapDistance
-            # I=lastLap, I=currentLap, H=sec1MS, B=sec1Min, H=sec2MS, B=sec2Min, H=deltaFront, H=deltaLeader, f=lapDistance
-            lap_struct_fmt = "<IIHBHBHHf"
+            # Extended lap format to extract sector times and current lap number
+            # I=lastLap, I=currentLap, H=sec1MS, B=sec1Min, H=sec2MS, B=sec2Min,
+            # H=sec3Time, H=deltaFront, H=deltaLeader, f=lapDistance, I=totalDistance,
+            # f=safetyCarDelta, B=carPos, B=currentLapNum
+            lap_struct_fmt = "<IIHBHBHHfIfBB"
 
             for car_idx in range(NUM_CARS):
                 car_offset = offset + (car_idx * LAP_BLOCK_SIZE)
@@ -194,17 +198,20 @@ class TelemetryLogger:
                 lap_data = struct.unpack(lap_struct_fmt, chunk)
 
                 current_lap_time = lap_data[1]
+                sector_1_ms = lap_data[2]
+                sector_2_ms = lap_data[4]
+                current_lap_num = lap_data[11]
 
                 # If this is YOUR car, update the memory variable
                 if car_idx == player_index:
-                    self.player_lap_distance = lap_data[8]
+                    self.player_lap_distance = lap_data[9]
 
-                lap_id = f"{session_uid}_{car_idx}"
+                lap_id = f"{session_uid}_{car_idx}_{current_lap_num}"
 
                 # Enqueue individual row — worker will batch-commit
                 self.db_queue.put((
-                    "INSERT OR REPLACE INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, sector_3_ms, tire_compound, wear_end_pct, lap_time_ms) VALUES (?, ?, ?, 0, 0, 0, 0, 0.0, ?)",
-                    (lap_id, str(session_uid), car_idx, current_lap_time)
+                    "INSERT OR REPLACE INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, sector_3_ms, tire_compound, wear_end_pct, lap_time_ms) VALUES (?, ?, ?, ?, ?, 0, 0, 0.0, ?)",
+                    (lap_id, str(session_uid), car_idx, sector_1_ms, sector_2_ms, current_lap_time)
                 ))
 
         except struct.error:
@@ -234,6 +241,9 @@ class TelemetryLogger:
             # [3] clutch (B)     — 0 to 100
             # [4] gear (b)       — -1 (reverse), 0 (neutral), 1-8
             # [5] engineRPM (H)
+            # [9-12] brakesTemperature (4H)
+            # [13-16] tyresSurfaceTemperature (4B)
+            # [17-20] tyresInnerTemperature (4B)
             speed    = fields[0]
             throttle = fields[1]
             brake    = fields[2]
@@ -241,13 +251,60 @@ class TelemetryLogger:
             # steer is NOT in CarTelemetryData — it comes from CarStatusData or MotionData
             steer    = 0.0
 
+            # Extract tire temperatures
+            temp_sur_fl = fields[13]
+            temp_sur_fr = fields[14]
+            temp_sur_rl = fields[15]
+            temp_sur_rr = fields[16]
+            temp_core_fl = fields[17]
+            temp_core_fr = fields[18]
+            temp_core_rl = fields[19]
+            temp_core_rr = fields[20]
+
             # Enqueue the telemetry row; background worker will commit
             self.db_queue.put((
-                "INSERT INTO telemetry (session_uid, lap_distance, throttle, brake, speed, steer, gear) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (str(session_uid), self.player_lap_distance, throttle, brake, speed, steer, gear),
+                "INSERT INTO telemetry (session_uid, lap_distance, throttle, brake, speed, steer, gear, temp_sur_fl, temp_sur_fr, temp_sur_rl, temp_sur_rr, temp_core_fl, temp_core_fr, temp_core_rl, temp_core_rr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (str(session_uid), self.player_lap_distance, throttle, brake, speed, steer, gear, temp_sur_fl, temp_sur_fr, temp_sur_rl, temp_sur_rr, temp_core_fl, temp_core_fr, temp_core_rl, temp_core_rr),
             ))
 
         except struct.error:
             logger.exception("struct.error unpacking car telemetry (packet may be malformed).")
         except Exception:
             logger.exception("DB error queueing micro-telemetry snapshot.")
+
+    def _handle_car_damage(self, data: bytes, offset: int, player_index: int, session_uid: int):
+        # F1 25 PacketCarDamageData: Each car's damage block is 10 bytes
+        # First 4 bytes are tyresWear (4 uint8s)
+        CAR_DAMAGE_BLOCK_SIZE = 10
+        TIRES_WEAR_FMT = "<4B"  # 4 uint8s for FL, FR, RL, RR
+
+        player_offset = offset + (player_index * CAR_DAMAGE_BLOCK_SIZE)
+        required = player_offset + struct.calcsize(TIRES_WEAR_FMT)
+
+        if len(data) < required:
+            logger.warning(
+                "PacketCarDamageData too short for player car: got %d bytes, need %d.",
+                len(data), required,
+            )
+            return
+
+        try:
+            # Extract tire wear percentages for the player's car
+            tires_wear = struct.unpack_from(TIRES_WEAR_FMT, data, player_offset)
+            # tires_wear[0] = FL (front-left)
+            wear_fl = tires_wear[0]
+
+            # Update the most recent lap with tire wear data
+            # We need to find the current lap_id based on session_uid and player's current lap number
+            # For simplicity, we'll use a generic update that targets the latest lap entry
+            # In a production system, you might track the current lap number separately
+            self.db_queue.put((
+                "UPDATE laps SET wear_end_pct = ? WHERE session_uid = ? AND car_index = ? AND lap_id IN (SELECT lap_id FROM laps WHERE session_uid = ? AND car_index = ? ORDER BY lap_id DESC LIMIT 1)",
+                (wear_fl, str(session_uid), player_index, str(session_uid), player_index)
+            ))
+
+        except struct.error:
+            logger.exception("struct.error unpacking car damage data (packet may be malformed).")
+        except Exception:
+            logger.exception("DB error updating tire wear.")
+
