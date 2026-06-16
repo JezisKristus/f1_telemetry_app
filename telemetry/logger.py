@@ -289,7 +289,7 @@ class TelemetryLogger:
             if completed_lap_num and completed_time and completed_time > 0:
                 sector_3 = max(0, completed_time - completed_s1 - completed_s2)
                 completed_id = f"{suid}_{car_idx}_{completed_lap_num}"
-                compound = self._player_status.get("compound", 0) if car_idx == player_index else 0
+                compound = self._player_status.get("actual_tyre_compound", 0) if car_idx == player_index else 0
                 self.db_queue.put((
                     "INSERT INTO laps (lap_id, session_uid, car_index, sector_1_ms, sector_2_ms, "
                     "sector_3_ms, tire_compound, lap_time_ms, position, delta_front_ms, is_valid) "
@@ -331,7 +331,7 @@ class TelemetryLogger:
             return
 
         status = self._player_status
-        steer = status.get("steer", 0.0)
+        steer = telem.get("steer", 0.0)
         ers_mode = status.get("ers_deploy_mode", 0)
 
         self.db_queue.put((

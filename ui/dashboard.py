@@ -49,6 +49,7 @@ class TelemetryDashboard(QMainWindow):
         self.degradation_plot.getPlotItem().getAxis("right").linkToView(self.right_axis)
         self.degradation_plot.getPlotItem().getAxis("right").setLabel("Tire Wear (%)")
         self.degradation_plot.getPlotItem().vb.sigResized.connect(self._update_right_axis_geometry)
+        self.right_axis.setXLink(self.degradation_plot.getPlotItem().vb)  # Links horizontal zooming
         self.actual_time_curve = pg.PlotCurveItem(pen=pg.mkPen(color="white", width=2))
         self.predicted_time_curve = pg.PlotCurveItem(pen=pg.mkPen(color="red", width=2, style=Qt.PenStyle.DashLine))
         self.wear_curve = pg.PlotCurveItem(pen=pg.mkPen(color="cyan", width=2, style=Qt.PenStyle.DashLine))
@@ -79,8 +80,9 @@ class TelemetryDashboard(QMainWindow):
         self.right_axis.setGeometry(self.degradation_plot.getPlotItem().vb.sceneBoundingRect())
 
     def _on_session_selected(self, session_uid):
-        self._session_uid = session_uid
-        self.coach_panel.refresh_sessions(session_uid)
+        # Trigger update_ui so it safely fetches the correct player_car_index from the DB
+        self.history_panel._current_session_uid = session_uid
+        self.update_ui()
 
     def update_ui(self):
         self.track_map.update_positions()
