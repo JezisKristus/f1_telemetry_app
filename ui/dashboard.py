@@ -110,9 +110,10 @@ class TelemetryDashboard(QMainWindow):
 
             self.live_panel.update_data(player_car_index)
 
-            if session_uid and session_uid != self._session_uid:
-                self._session_uid = session_uid
-                self.coach_panel.refresh_sessions(session_uid)
+            if session_uid:
+                if session_uid != self._session_uid or getattr(self.coach_panel, '_player_car_index', -1) != player_car_index:
+                    self._session_uid = session_uid
+                    self.coach_panel.refresh_sessions(session_uid, player_car_index)
 
             if session_uid:
                 analyzer = StintAnalyzer(self.db_path)

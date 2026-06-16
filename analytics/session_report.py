@@ -13,7 +13,7 @@ class SessionReportExporter:
     def __init__(self, db_path):
         self.db_path = db_path
 
-    def export_html(self, session_uid, output_path=None):
+    def export_html(self, session_uid, player_car_index=0, output_path=None):
         conn = sqlite3.connect(self.db_path)
         cur = conn.cursor()
         cur.execute(
@@ -26,7 +26,7 @@ class SessionReportExporter:
         track = session_row[0] if session_row else "Unknown"
         session_type = session_row[1] if session_row else "Unknown"
 
-        stint = StintAnalyzer(self.db_path).get_stint_summary(session_uid, 0)
+        stint = StintAnalyzer(self.db_path).get_stint_summary(session_uid, player_car_index)
         slip = SlipAngleDetector(self.db_path).analyze_session(session_uid)
         setup = SetupEvolution(self.db_path).best_setup_at_track(track)
 

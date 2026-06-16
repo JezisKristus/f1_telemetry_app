@@ -100,6 +100,10 @@ class DBManager:
                 ("session_type_name", "TEXT DEFAULT ''"),
                 ("player_car_index", "INTEGER DEFAULT 0"),
                 ("teammate_car_index", "INTEGER DEFAULT -1"),
+                ("session_name", "TEXT DEFAULT ''"),
+                ("series", "TEXT DEFAULT ''"),
+                ("team", "TEXT DEFAULT ''"),
+                ("session_date", "TEXT DEFAULT ''"),
             ]:
                 self._add_column_if_missing("sessions", col, typ)
 
@@ -131,7 +135,11 @@ class DBManager:
                 track_name TEXT DEFAULT '',
                 session_type_name TEXT DEFAULT '',
                 player_car_index INTEGER DEFAULT 0,
-                teammate_car_index INTEGER DEFAULT -1
+                teammate_car_index INTEGER DEFAULT -1,
+                session_name TEXT DEFAULT '',
+                series TEXT DEFAULT '',
+                team TEXT DEFAULT '',
+                session_date TEXT DEFAULT ''
             )
         ''')
 

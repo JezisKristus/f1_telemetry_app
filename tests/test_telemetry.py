@@ -133,6 +133,8 @@ class TestSchemaMigrations:
         db.cursor.execute("PRAGMA table_info(sessions)")
         cols = {row[1] for row in db.cursor.fetchall()}
         assert "teammate_car_index" in cols
+        for col in ("session_name", "series", "team", "session_date"):
+            assert col in cols
 
 
 class TestAIDifficulty:

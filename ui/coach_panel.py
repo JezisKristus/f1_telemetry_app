@@ -73,13 +73,14 @@ class CoachPanel(QWidget):
 
         self._session_uid = None
 
-    def refresh_sessions(self, session_uid=None):
+    def refresh_sessions(self, session_uid=None, player_car_index=0):
         if session_uid:
             self._session_uid = session_uid
         if not self._session_uid:
             return
         self.session_label.setText(f"Session: {self._session_uid}")
-        laps = self.delta.get_valid_laps(self._session_uid, 0)
+        self._player_car_index = player_car_index
+        laps = self.delta.get_valid_laps(self._session_uid, player_car_index)
         self.ref_combo.clear()
         self.comp_combo.clear()
         for lap in laps:
@@ -90,7 +91,7 @@ class CoachPanel(QWidget):
             self.comp_combo.setCurrentIndex(min(1, len(laps) - 1))
 
         slip_result = self.slip.analyze_session(self._session_uid)
-        ai_recs = self.ai_scaler.analyze(self._session_uid) or []
+        ai_recs = self.ai_scaler.analyze(self._session_uid, player_car_index) or []
         setups = self.setup_evo.get_setups_for_track()[:3]
         lines = [slip_result.get("summary", "")]
         lines.extend(r["message"] for r in ai_recs)
@@ -126,5 +127,5 @@ class CoachPanel(QWidget):
     def _export_report(self):
         if not self._session_uid:
             return
-        path = self.report.export_html(self._session_uid)
+        path = self.report.export_html(self._session_uid, getattr(self, '_player_car_index', 0))
         self.insights_label.setText(f"Report exported to {path}")

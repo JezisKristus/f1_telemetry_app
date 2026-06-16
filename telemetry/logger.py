@@ -131,11 +131,12 @@ class TelemetryLogger:
             self.packet_counter += 1
 
         suid = str(session_uid)
+        current_date_str = time.strftime("%Y-%m-%d %H:%M:%S")
         self.db_queue.put((
             "INSERT OR IGNORE INTO sessions "
-            "(session_uid, track_id, weather, ai_difficulty, session_type, player_car_index) "
-            "VALUES (?, 0, 0, 0, 0, ?)",
-            (suid, player_car_index),
+            "(session_uid, track_id, weather, ai_difficulty, session_type, player_car_index, session_date) "
+            "VALUES (?, 0, 0, 0, 0, ?, ?)",
+            (suid, player_car_index, current_date_str),
         ))
 
         if packet_id == 0:
